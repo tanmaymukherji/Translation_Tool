@@ -309,6 +309,8 @@ export default function OcrValidator({ images, paragraphs, onSaveParagraphs }) {
                       imageData={pageImage?.data}
                       lines={p.lines}
                       onFocusImage={setFocusBbox}
+                      paraIndex={idx}
+                      totalParas={pageParagraphs.length}
                     />
                     <span className="text-[11px] text-gray-400 font-mono">¶{p.index + 1}</span>
                     {isEdited && <span className="text-[11px] text-amber-600 font-medium">edited</span>}

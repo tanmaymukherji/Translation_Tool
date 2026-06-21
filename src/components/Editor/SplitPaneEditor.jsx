@@ -75,7 +75,7 @@ function PageGroup({ pageNum, paragraphs, originals, translations, translatingIn
           </span>
         )}
       </div>
-      {paragraphs.map((p) => {
+      {paragraphs.map((p, idx) => {
         const text = originals[p.index] !== undefined ? originals[p.index] : p.text;
         const rows = Math.max(2, text.split('\n').length, Math.ceil(text.length / 55));
         if (!textareaRefs.current[p.index]) textareaRefs.current[p.index] = createRef();
@@ -87,6 +87,8 @@ function PageGroup({ pageNum, paragraphs, originals, translations, translatingIn
                 textareaRef={textareaRefs.current[p.index]}
                 imageData={imageData}
                 lines={linesByIndex[p.index]}
+                paraIndex={idx}
+                totalParas={paragraphs.length}
               />
               <span className="text-[11px] text-gray-400 font-mono">¶{p.index + 1}</span>
               <span className="text-[11px] text-gray-400">p.{pageNum}</span>
@@ -140,7 +142,7 @@ function TranslationPageGroup({ pageNum, paragraphs, translations, onTextChange,
           </span>
         )}
       </div>
-      {paraList.map((p) => {
+      {paraList.map((p, idx) => {
         const t = translations[p.index];
         if (t === undefined) return null;
         const rows = Math.max(2, t.split('\n').length, Math.ceil(t.length / 55));
@@ -153,6 +155,8 @@ function TranslationPageGroup({ pageNum, paragraphs, translations, onTextChange,
                 textareaRef={textareaRefs.current[p.index]}
                 imageData={imageData}
                 lines={linesByIndex[p.index]}
+                paraIndex={idx}
+                totalParas={paraList.length}
               />
               <span className="text-[11px] text-gray-400 font-mono">¶{p.index + 1}</span>
             </div>

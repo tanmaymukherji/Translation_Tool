@@ -15,7 +15,7 @@ function findLineBbox(lines, selStart, selEnd) {
   return null;
 }
 
-export function ReScanButton({ textareaRef, imageData, lines, onFocusImage }) {
+export function ReScanButton({ textareaRef, imageData, lines, onFocusImage, paraIndex, totalParas }) {
   const btnRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [result, setResult] = useState('');
@@ -32,6 +32,11 @@ export function ReScanButton({ textareaRef, imageData, lines, onFocusImage }) {
     return () => document.removeEventListener('mousedown', handler);
   }, [open, close]);
 
+  function estimateParaBbox(img, idx, total) {
+    const ph = img.naturalHeight / total;
+    return { x0: 0, y0: idx * ph, x1: img.naturalWidth, y1: (idx + 1) * ph };
+  }
+
   const handleClick = useCallback(() => {
     const ta = textareaRef?.current;
     if (!ta) return;
@@ -45,9 +50,12 @@ export function ReScanButton({ textareaRef, imageData, lines, onFocusImage }) {
     setSelPreview(text.length > 80 ? text.slice(0, 80) + '...' : text);
     setOpen(true);
     setResult('');
-    setLoading(true);
+    setLoading(false);
 
-    if (imageData && lines && lines.length > 0 && sel !== sele) {
+    if (!imageData) { setResult('No image available for this page.'); return; }
+
+    // If Tesseract provided line bbox, use it for precise crop
+    if (lines && lines.length > 0 && sel !== sele) {
       const found = findLineBbox(lines, sel, sele);
       if (found && found.bbox && typeof found.bbox.x0 === 'number') {
         if (onFocusImage) onFocusImage(found.bbox);
@@ -59,21 +67,35 @@ export function ReScanButton({ textareaRef, imageData, lines, onFocusImage }) {
           setResult('Error: ' + (err?.message || err || 'OCR.space API failed'));
           setLoading(false);
         });
-      } else {
-        setResult('Could not locate your selection in the image. Try a different selection.');
-        setLoading(false);
+        return;
       }
-    } else if (!imageData) {
-      setResult('No image available for this page.');
-      setLoading(false);
-    } else if (!lines || lines.length === 0) {
-      setResult('This page was OCR\'d without line position data. Re-import the images with the latest version to enable region re-scan.');
-      setLoading(false);
+    }
+
+    // Fallback: estimate bbox from paragraph position on the page
+    if (paraIndex != null && totalParas != null && totalParas > 0) {
+      const img = new window.Image();
+      img.onload = () => {
+        const bbox = estimateParaBbox(img, paraIndex, totalParas);
+        if (onFocusImage) onFocusImage(bbox);
+        setLoading(true);
+        reOcrRegion(imageData, bbox).then((txt) => {
+          setResult(txt || '(empty result)');
+          setLoading(false);
+        }).catch((err) => {
+          setResult('Error: ' + (err?.message || err || 'OCR.space API failed'));
+          setLoading(false);
+        });
+      };
+      img.onerror = () => {
+        setResult('Could not load image for region estimate.');
+        setLoading(false);
+      };
+      img.src = imageData;
     } else {
-      setResult('Select a portion of text first to re-scan that region from the image.');
+      setResult('Cannot determine image region. Select a few words within a paragraph and try again.');
       setLoading(false);
     }
-  }, [textareaRef, imageData, lines, onFocusImage]);
+  }, [textareaRef, imageData, lines, onFocusImage, paraIndex, totalParas]);
 
   return (
     <>
