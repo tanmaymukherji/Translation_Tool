@@ -213,8 +213,6 @@ function loadImage(src) {
   });
 }
 
-const MAX_DIM = 1200;
-
 export async function reOcrRegion(imageData, bbox, padding) {
   const img = await loadImage(imageData);
   let iw = img.naturalWidth;
@@ -232,19 +230,11 @@ export async function reOcrRegion(imageData, bbox, padding) {
     sx = 0; sy = 0; sw = iw; sh = ih;
   }
 
-  // Scale down if region exceeds MAX_DIM to keep API payload manageable
-  let scale = 1;
-  if (sw > MAX_DIM || sh > MAX_DIM) {
-    scale = Math.min(MAX_DIM / sw, MAX_DIM / sh);
-  }
-  const cw = Math.round(sw * scale);
-  const ch = Math.round(sh * scale);
-
   const canvas = document.createElement('canvas');
-  canvas.width = cw;
-  canvas.height = ch;
+  canvas.width = sw;
+  canvas.height = sh;
   const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
 
   const base64 = canvas.toDataURL('image/png');
   const apiKey = CONFIG.OCR_SPACE_API_KEY;
