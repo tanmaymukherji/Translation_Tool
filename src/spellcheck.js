@@ -43,19 +43,6 @@ const CONFUSABLES = [
   ['\u0902', '\u0901', ''], // ं vs ँ vs nothing
 ];
 
-function colorizeDiff(original, candidate) {
-  let result = '';
-  const maxLen = Math.max(original.length, candidate.length);
-  for (let i = 0; i < maxLen; i++) {
-    if (original[i] !== candidate[i]) {
-      result += candidate[i] || '';
-    } else {
-      result += candidate[i] || '';
-    }
-  }
-  return result;
-}
-
 export async function initSpellcheck() {
   if (spellInstance) return spellInstance;
   if (spellPromise) return spellPromise;
@@ -82,6 +69,14 @@ export function suggestWord(word) {
   return spellInstance.suggest(word).filter((s) => s !== word).slice(0, 6);
 }
 
+const COMMON_CHARS = '\u0905\u0906\u0907\u0908\u0909\u090A\u090B\u090F\u0910\u0913\u0914' + // vowels
+  '\u0915\u0916\u0917\u0918\u0919' + // क ख ग घ ङ
+  '\u091A\u091B\u091C\u091D\u091E' + // च छ ज झ ञ
+  '\u091F\u0920\u0921\u0922\u0923' + // ट ठ ड ढ ण
+  '\u0924\u0925\u0926\u0927\u0928' + // त थ द ध न
+  '\u092A\u092B\u092C\u092D\u092E' + // प फ ब भ म
+  '\u092F\u0930\u0932\u0935\u0936\u0937\u0938\u0939'; // य र ल व श ष स ह
+
 function genOneEditVariants(word) {
   const seen = new Set();
   const chars = [...word];
@@ -93,15 +88,15 @@ function genOneEditVariants(word) {
     const subs = SIMILAR_CHARS[ch] || '';
     for (const s of subs) {
       const variant = chars.slice(0, i).join('') + s + chars.slice(i + 1).join('');
-      if (variant !== word) seen.add(variant);
+      seen.add(variant);
     }
 
-    // Substitute with matra-like confusions (vowel signs)
+    // Substitute with matra-like confusions
     for (const group of CONFUSABLES) {
       for (const alt of group) {
         if (alt && alt !== ch) {
           const variant = chars.slice(0, i).join('') + alt + chars.slice(i + 1).join('');
-          if (variant !== word) seen.add(variant);
+          seen.add(variant);
         }
       }
     }
@@ -113,19 +108,28 @@ function genOneEditVariants(word) {
     if (variant.length > 0) seen.add(variant);
   }
 
+  // Swap adjacent characters (transposition)
+  for (let i = 0; i < chars.length - 1; i++) {
+    const swapped = [...chars];
+    [swapped[i], swapped[i + 1]] = [swapped[i + 1], swapped[i]];
+    seen.add(swapped.join(''));
+  }
+
+  // Insert common characters at each position
+  for (let i = 0; i <= chars.length; i++) {
+    for (const c of COMMON_CHARS) {
+      const variant = chars.slice(0, i).join('') + c + chars.slice(i).join('');
+      seen.add(variant);
+    }
+  }
+
   return [...seen];
 }
 
 export function findSimilarWords(word) {
   if (!spellInstance) return [];
-
-  // First, check if word is already correct — then generate similar alternatives
   const variants = genOneEditVariants(word);
-  const valid = variants
-    .filter((v) => spellInstance.correct(v))
-    .slice(0, 12);
-
-  return valid;
+  return variants.filter((v) => spellInstance.correct(v)).slice(0, 12);
 }
 
 export async function fetchSuggestions(word, fullText, selStart, selEnd) {

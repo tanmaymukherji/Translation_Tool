@@ -82,11 +82,9 @@ function PageGroup({ pageNum, paragraphs, originals, translations, translatingIn
         return (
           <div key={p.id || p.index} className="mb-2 ml-2">
             <div className="flex items-center gap-2 mb-0.5">
+              <SuggestionButton textareaRef={textareaRefs.current[p.index]} />
               <span className="text-[11px] text-gray-400 font-mono">¶{p.index + 1}</span>
               <span className="text-[11px] text-gray-400">p.{pageNum}</span>
-              <div className="ml-auto">
-                <SuggestionButton textareaRef={textareaRefs.current[p.index]} />
-              </div>
             </div>
             <SmartTextarea
               ref={textareaRefs.current[p.index]}
@@ -145,10 +143,8 @@ function TranslationPageGroup({ pageNum, paragraphs, translations, onTextChange 
         return (
           <div key={p.id || p.index} className="mb-2 ml-2">
             <div className="flex items-center gap-2 mb-0.5">
+              <SuggestionButton textareaRef={textareaRefs.current[p.index]} />
               <span className="text-[11px] text-gray-400 font-mono">¶{p.index + 1}</span>
-              <div className="ml-auto">
-                <SuggestionButton textareaRef={textareaRefs.current[p.index]} />
-              </div>
             </div>
             <SmartTextarea
               ref={textareaRefs.current[p.index]}
