@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { translate } from '../../translation';
 import { generateDocx } from '../../docx';
+import SmartTextarea from './SmartTextarea';
 import CONFIG from '../../config';
 
 function parseParagraphs(project) {
@@ -81,9 +82,9 @@ function PageGroup({ pageNum, paragraphs, originals, translations, translatingIn
               <span className="text-[11px] text-gray-400 font-mono">¶{p.index + 1}</span>
               <span className="text-[11px] text-gray-400">p.{pageNum}</span>
             </div>
-            <textarea
+            <SmartTextarea
               value={text}
-              onChange={(e) => onTextChange(p.index, e.target.value)}
+              onChange={(newText) => onTextChange(p.index, newText)}
               className="w-full p-3 bg-white rounded border border-gray-200 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 text-sm resize-y min-h-[3.5rem] font-sans leading-relaxed whitespace-pre-wrap"
               rows={rows}
             />
@@ -137,9 +138,9 @@ function TranslationPageGroup({ pageNum, paragraphs, translations, onTextChange 
             <div className="flex items-center gap-2 mb-0.5">
               <span className="text-[11px] text-gray-400 font-mono">¶{p.index + 1}</span>
             </div>
-            <textarea
+            <SmartTextarea
               value={t}
-              onChange={(e) => onTextChange(p.index, e.target.value)}
+              onChange={(newText) => onTextChange(p.index, newText)}
               className="w-full p-3 bg-white rounded border border-green-200 focus:border-green-400 focus:ring-1 focus:ring-green-400 text-sm resize-y min-h-[3.5rem] font-sans leading-relaxed whitespace-pre-wrap"
               rows={rows}
             />

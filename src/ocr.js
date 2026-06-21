@@ -45,8 +45,10 @@ function groupLinesIntoParagraphs(lines) {
       const gap = lineTop - prevBottom;
       const lineHeight = lineBottom - lineTop;
 
-      // If gap is more than 1.5x the line height, it's a new paragraph
-      if (gap > lineHeight * 1.5) {
+      // Only start a new paragraph if the gap is large (>2.5x line height)
+      // AND the current paragraph has at least 2 lines, or the new line is long
+      const wouldBeSingle = current.length === 0;
+      if (gap > lineHeight * 2.5 && !wouldBeSingle) {
         if (current.length > 0) {
           paragraphs.push(current.join('\n').trim());
           current = [];

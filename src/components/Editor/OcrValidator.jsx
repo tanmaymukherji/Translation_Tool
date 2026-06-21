@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import SmartTextarea from './SmartTextarea';
 
 function ZoomableImage({ src, alt }) {
   const containerRef = useRef(null);
@@ -264,9 +265,9 @@ export default function OcrValidator({ images, paragraphs, onSaveParagraphs }) {
                     <span className="text-[11px] text-gray-400 font-mono">¶{p.index + 1}</span>
                     {isEdited && <span className="text-[11px] text-amber-600 font-medium">edited</span>}
                   </div>
-                  <textarea
+                  <SmartTextarea
                     value={text}
-                    onChange={(e) => updateText(p.index, e.target.value)}
+                    onChange={(newText) => updateText(p.index, newText)}
                     className={`w-full p-3 rounded border text-sm resize-y min-h-[3.5rem] font-sans leading-relaxed whitespace-pre-wrap focus:outline-none ${
                       isEdited
                         ? 'bg-amber-50 border-amber-300 focus:border-amber-500 focus:ring-1 focus:ring-amber-500'

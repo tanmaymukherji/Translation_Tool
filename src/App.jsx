@@ -3,6 +3,7 @@ import DocumentLibrary from './components/Library/DocumentLibrary';
 import SplitPaneEditor from './components/Editor/SplitPaneEditor';
 import OcrValidator from './components/Editor/OcrValidator';
 import FolderImporter from './components/Importer/FolderImporter';
+import DocxImporter from './components/Importer/DocxImporter';
 import SettingsPanel from './components/SettingsPanel';
 import ErrorBanner from './components/ErrorBanner';
 import { listProjects, saveProject, deleteProject } from './storage';
@@ -92,7 +93,7 @@ export default function App() {
 
       await loadProjects();
       setActiveProject(project);
-      setEditorTab('ocr');
+      setEditorTab(result.isDocx ? 'translate' : 'ocr');
       setView('editor');
     } catch (err) {
       setError(err.message || 'Failed to create project');
@@ -186,6 +187,7 @@ export default function App() {
             ⚙
           </button>
           <FolderImporter onImport={handleProjectResult} disabled={loading} />
+          <DocxImporter onImport={handleProjectResult} disabled={loading} />
         </div>
       </header>
 
