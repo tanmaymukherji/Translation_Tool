@@ -1,35 +1,24 @@
-// Translation API - direct browser calls to LibreTranslate / Hugging Face / Bhashini
+// Translation API - direct browser calls to MyMemory / LibreTranslate / Hugging Face
 
 import CONFIG from './config';
 
-// LibreTranslate public instance (free, supports CORS)
-const LIBRE_TRANSLATE_URL = 'https://libretranslate.com/translate';
-const LIBRE_LANGS = {
-  bn: { name: 'Bengali', code: 'bn' },
-  hi: { name: 'Hindi', code: 'hi' },
-  ta: { name: 'Tamil', code: 'ta' },
-  te: { name: 'Telugu', code: 'te' },
-  mr: { name: 'Marathi', code: 'mr' },
-  gu: { name: 'Gujarati', code: 'gu' },
-  kn: { name: 'Kannada', code: 'kn' },
-  ml: { name: 'Malayalam', code: 'ml' },
-  pa: { name: 'Punjabi', code: 'pa' },
-  ur: { name: 'Urdu', code: 'ur' },
+const MYMEMORY_URL = 'https://api.mymemory.translated.net/get';
+
+const LANG_MAP = {
+  bn: 'bn', hi: 'hi', ta: 'ta', te: 'te', mr: 'mr',
+  gu: 'gu', kn: 'kn', ml: 'ml', pa: 'pa', ur: 'ur',
 };
 
-// Hugging Face language code mapping for IndicTrans2
+const LIBRE_LANG_MAP = {
+  bn: 'bn', hi: 'hi', ta: 'ta', te: 'te', mr: 'mr',
+  gu: 'gu', kn: 'kn', ml: 'ml', pa: 'pa', ur: 'ur',
+};
+
+// Hugging Face code mapping for IndicTrans2
 const IT2_LANG_MAP = {
-  bn: 'ben_Beng',
-  hi: 'hin_Deva',
-  ta: 'tam_Taml',
-  te: 'tel_Telu',
-  mr: 'mar_Deva',
-  gu: 'guj_Gujr',
-  kn: 'kan_Knda',
-  ml: 'mal_Mlym',
-  pa: 'pan_Guru',
-  ur: 'urd_Arab',
-  en: 'eng_Latn',
+  bn: 'ben_Beng', hi: 'hin_Deva', ta: 'tam_Taml', te: 'tel_Telu',
+  mr: 'mar_Deva', gu: 'guj_Gujr', kn: 'kan_Knda', ml: 'mal_Mlym',
+  pa: 'pan_Guru', ur: 'urd_Arab', en: 'eng_Latn',
 };
 
 function toIT2Code(lang) {
@@ -52,11 +41,31 @@ function isSanskrit(text) {
   return text.length > 0 && devanagari / text.length > 0.3;
 }
 
-// ---- LibreTranslate ----
-async function translateLibre(text, srcLang, tgtLang) {
-  const src = srcLang === 'auto' ? detectLanguage(text) : srcLang;
+// ---- MyMemory API (free, CORS-friendly, no auth needed) ----
+async function translateMyMemory(text, tgtLang) {
+  const src = detectLanguage(text);
+  const langpair = `${src}|${tgtLang}`;
+  const url = `${MYMEMORY_URL}?q=${encodeURIComponent(text)}&langpair=${langpair}`;
 
-  const response = await fetch(LIBRE_TRANSLATE_URL, {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`MyMemory error (${response.status})`);
+  }
+
+  const result = await response.json();
+  if (result.responseStatus !== 200) {
+    throw new Error(`MyMemory error: ${result.responseDetails || result.responseStatus}`);
+  }
+
+  return result.responseData?.translatedText || '';
+}
+
+// ---- LibreTranslate (CORS-friendly, needs API key for public instance) ----
+async function translateLibre(text, tgtLang) {
+  const src = detectLanguage(text);
+  const apiKey = localStorage.getItem('libretranslate_api_key') || '';
+
+  const response = await fetch('https://libretranslate.com/translate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -64,6 +73,7 @@ async function translateLibre(text, srcLang, tgtLang) {
       source: src,
       target: tgtLang,
       format: 'text',
+      api_key: apiKey || undefined,
     }),
   });
 
@@ -81,26 +91,18 @@ async function translateOpusMT(text, tgtLang, apiKey) {
   const modelId = `Helsinki-NLP/opus-mt-en-${tgtLang}`;
   const url = `${CONFIG.HUGGINGFACE_API_URL}/${modelId}`;
   const headers = { 'Content-Type': 'application/json' };
-  if (apiKey) {
-    headers['Authorization'] = `Bearer ${apiKey}`;
-  }
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ inputs: text }),
-  });
+  const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ inputs: text }) });
 
   if (response.status === 503) {
     await new Promise((r) => setTimeout(r, 8000));
     return translateOpusMT(text, tgtLang, apiKey);
   }
-
   if (!response.ok) {
     const body = await response.text().catch(() => '');
     throw new Error(`HF OPUS-MT error (${response.status}): ${body}`);
   }
-
   const result = await response.json();
   if (Array.isArray(result)) {
     return result[0]?.translation_text || result[0]?.generated_text || String(result[0] || '');
@@ -114,39 +116,27 @@ async function translateIndicTrans2(text, srcLang, tgtLang, apiKey) {
   const tgt = toIT2Code(tgtLang);
 
   let modelId;
-  if (src === 'eng_Latn') {
-    modelId = CONFIG.INDICTRANS2_MODELS['en-indic'];
-  } else if (tgt === 'eng_Latn') {
-    modelId = CONFIG.INDICTRANS2_MODELS['indic-en'];
-  } else {
-    modelId = CONFIG.INDICTRANS2_MODELS['indic-indic'];
-  }
+  if (src === 'eng_Latn') modelId = CONFIG.INDICTRANS2_MODELS['en-indic'];
+  else if (tgt === 'eng_Latn') modelId = CONFIG.INDICTRANS2_MODELS['indic-en'];
+  else modelId = CONFIG.INDICTRANS2_MODELS['indic-indic'];
 
   const url = `${CONFIG.HUGGINGFACE_API_URL}/${modelId}`;
   const key = apiKey || CONFIG.HUGGINGFACE_API_KEY;
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      inputs: text,
-      parameters: { src_lang: src, tgt_lang: tgt },
-    }),
+    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ inputs: text, parameters: { src_lang: src, tgt_lang: tgt } }),
   });
 
   if (response.status === 503) {
     await new Promise((r) => setTimeout(r, 8000));
     return translateIndicTrans2(text, srcLang, tgtLang, apiKey);
   }
-
   if (!response.ok) {
     const body = await response.text().catch(() => '');
     throw new Error(`HF IndicTrans2 error (${response.status}): ${body}`);
   }
-
   const result = await response.json();
   let translation;
   if (Array.isArray(result)) {
@@ -159,89 +149,80 @@ async function translateIndicTrans2(text, srcLang, tgtLang, apiKey) {
   return translation;
 }
 
-// ---- Public API (tries LibreTranslate first, then Hugging Face) ----
+// ---- Public API (tries MyMemory first, then LibreTranslate, then Hugging Face) ----
 export async function translateHF(text, srcLang, tgtLang, apiKey) {
   if (isSanskrit(text)) {
     return { translation: text, note: 'Sanskrit text kept as-is' };
   }
 
-  const tgt = LIBRE_LANGS[tgtLang]?.code;
-  const src = srcLang === 'auto' ? 'auto' : srcLang;
-
+  const tgt = LANG_MAP[tgtLang];
   let errors = [];
 
-  // Try LibreTranslate first (CORS-friendly, free, no auth needed)
+  // 1. MyMemory (free, no auth needed, CORS-friendly)
   if (tgt) {
     try {
-      const translation = await translateLibre(text, src, tgt);
-      return { translation };
-    } catch (libreErr) {
-      errors.push(`LibreTranslate: ${libreErr.message}`);
+      const translation = await translateMyMemory(text, tgt);
+      if (translation) return { translation };
+    } catch (e) {
+      errors.push(`MyMemory: ${e.message}`);
     }
   }
 
-  // Try OPUS-MT next (source must be English)
+  // 2. LibreTranslate
+  if (tgt && LIBRE_LANG_MAP[tgtLang]) {
+    try {
+      const translation = await translateLibre(text, LIBRE_LANG_MAP[tgtLang]);
+      if (translation) return { translation };
+    } catch (e) {
+      errors.push(`LibreTranslate: ${e.message}`);
+    }
+  }
+
+  // 3. OPUS-MT (English source only)
   if (srcLang === 'auto' || srcLang === 'en') {
     try {
       const translation = await translateOpusMT(text, tgtLang, apiKey);
       return { translation };
-    } catch (opusErr) {
-      errors.push(`OPUS-MT: ${opusErr.message}`);
+    } catch (e) {
+      errors.push(`OPUS-MT: ${e.message}`);
     }
   }
 
-  // Try IndicTrans2 last
+  // 4. IndicTrans2
   try {
     const translation = await translateIndicTrans2(text, srcLang, tgtLang, apiKey);
     return { translation };
-  } catch (it2Err) {
-    errors.push(`IndicTrans2: ${it2Err.message}`);
+  } catch (e) {
+    errors.push(`IndicTrans2: ${e.message}`);
   }
 
   throw new Error(`All translation methods failed: ${errors.join('; ')}`);
 }
 
-// ---- Bhashini (kept for when API key is available) ----
+// ---- Bhashini ----
 export async function translateBhashini(text, srcLang, tgtLang, apiKey) {
-  if (isSanskrit(text)) {
-    return { translation: text, note: 'Sanskrit text kept as-is' };
-  }
-
-  if (!apiKey) {
-    throw new Error('Bhashini API key not configured');
-  }
+  if (isSanskrit(text)) return { translation: text, note: 'Sanskrit text kept as-is' };
+  if (!apiKey) throw new Error('Bhashini API key not configured');
 
   const src = srcLang === 'auto' ? detectLanguage(text) : srcLang;
-
   const response = await fetch(`${CONFIG.BHASHINI_API_URL}/translate`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      sourceLanguage: src,
-      targetLanguage: tgtLang,
-      text,
-    }),
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourceLanguage: src, targetLanguage: tgtLang, text }),
   });
-
-  if (!response.ok) {
-    throw new Error(`Bhashini API error (${response.status})`);
-  }
-
+  if (!response.ok) throw new Error(`Bhashini API error (${response.status})`);
   const result = await response.json();
   return { translation: result.translation || result.text || '' };
 }
 
-// ---- Top-level translate function ----
+// ---- Top-level translate ----
 export async function translate(provider, text, srcLang, tgtLang, apiKey) {
   if (provider === 'bhashini') {
     try {
       return await translateBhashini(text, srcLang, tgtLang, apiKey);
     } catch (e) {
       if (e.message.includes('key not configured')) {
-        console.warn('Bhashini unavailable, falling back to Hugging Face:', e.message);
+        console.warn('Bhashini unavailable, falling back to HF:', e.message);
         return await translateHF(text, srcLang, tgtLang, apiKey);
       }
       throw e;
