@@ -57,7 +57,7 @@ function parseParagraphs(project) {
   return result;
 }
 
-function PageGroup({ pageNum, paragraphs, originals, translations, translatingIndex, onTextChange, onTranslate, onKeepOriginal }) {
+function PageGroup({ pageNum, paragraphs, originals, translations, translatingIndex, onTextChange, onTranslate, onKeepOriginal, imageData, linesByIndex }) {
   const textareaRefs = useRef({});
   const filename = paragraphs[0]?.filename || '';
   return (
@@ -82,7 +82,11 @@ function PageGroup({ pageNum, paragraphs, originals, translations, translatingIn
         return (
           <div key={p.id || p.index} className="mb-2 ml-2">
             <div className="flex items-center gap-2 mb-0.5">
-              <SuggestionButton textareaRef={textareaRefs.current[p.index]} />
+              <SuggestionButton
+                textareaRef={textareaRefs.current[p.index]}
+                imageData={imageData}
+                lines={linesByIndex[p.index]}
+              />
               <span className="text-[11px] text-gray-400 font-mono">¶{p.index + 1}</span>
               <span className="text-[11px] text-gray-400">p.{pageNum}</span>
             </div>
@@ -115,7 +119,7 @@ function PageGroup({ pageNum, paragraphs, originals, translations, translatingIn
   );
 }
 
-function TranslationPageGroup({ pageNum, paragraphs, translations, onTextChange }) {
+function TranslationPageGroup({ pageNum, paragraphs, translations, onTextChange, imageData, linesByIndex }) {
   const textareaRefs = useRef({});
   const paraList = Array.isArray(paragraphs) ? paragraphs : [];
   const hasAny = paraList.some((p) => translations && translations[p.index] !== undefined);
@@ -143,7 +147,11 @@ function TranslationPageGroup({ pageNum, paragraphs, translations, onTextChange 
         return (
           <div key={p.id || p.index} className="mb-2 ml-2">
             <div className="flex items-center gap-2 mb-0.5">
-              <SuggestionButton textareaRef={textareaRefs.current[p.index]} />
+              <SuggestionButton
+                textareaRef={textareaRefs.current[p.index]}
+                imageData={imageData}
+                lines={linesByIndex[p.index]}
+              />
               <span className="text-[11px] text-gray-400 font-mono">¶{p.index + 1}</span>
             </div>
             <SmartTextarea
@@ -160,11 +168,30 @@ function TranslationPageGroup({ pageNum, paragraphs, translations, onTextChange 
   );
 }
 
-export default function SplitPaneEditor({ project, onSave, loading }) {
+export default function SplitPaneEditor({ project, images, paragraphs: origParagraphs, onSave, loading }) {
   const [paragraphs, setParagraphs] = useState([]);
   const [originals, setOriginals] = useState({});
   const [translations, setTranslations] = useState({});
   const [translatingIndex, setTranslatingIndex] = useState(null);
+
+  // Lookup maps for the re-scan feature
+  const imageByPage = useMemo(() => {
+    const map = {};
+    for (const img of (images || [])) {
+      map[img.page] = img.data;
+    }
+    return map;
+  }, [images]);
+
+  const linesByIndex = useMemo(() => {
+    const map = {};
+    for (const p of (origParagraphs || [])) {
+      if (p.lines && p.lines.length > 0) {
+        map[p.index] = p.lines;
+      }
+    }
+    return map;
+  }, [origParagraphs]);
   const [targetLang, setTargetLang] = useState(
     () => localStorage.getItem('target_lang') || 'bn'
   );
@@ -278,6 +305,8 @@ export default function SplitPaneEditor({ project, onSave, loading }) {
               onTextChange={updateOriginal}
               onTranslate={handleTranslate}
               onKeepOriginal={handleKeepOriginal}
+              imageData={imageByPage[page]}
+              linesByIndex={linesByIndex}
             />
           ))}
           {pages.length === 0 && (
@@ -353,6 +382,8 @@ export default function SplitPaneEditor({ project, onSave, loading }) {
                 paragraphs={pageParas}
                 translations={translations}
                 onTextChange={updateTranslation}
+                imageData={imageByPage[page]}
+                linesByIndex={linesByIndex}
               />
             ))
           ) : (

@@ -237,6 +237,8 @@ export default function App() {
             ) : (
               <SplitPaneEditor
                 project={activeProject}
+                images={activeProject.images || []}
+                paragraphs={activeProject.paragraphsArray || []}
                 onSave={handleSaveContent}
                 loading={loading}
               />
