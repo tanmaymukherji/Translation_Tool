@@ -1,6 +1,28 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { initSpellcheck, isCorrect, suggestWord } from '../../spellcheck';
 
 const LT_URL = 'https://api.languagetool.org/v2/check';
+
+const LT_LANGS = new Set([
+  'en-US', 'en-GB', 'en-AU', 'en-CA', 'en-NZ', 'en-ZA',
+  'de', 'de-DE', 'de-AT', 'de-CH',
+  'fr', 'fr-FR', 'fr-CA', 'fr-BE', 'fr-CH',
+  'es', 'es-ES', 'es-AR',
+  'pt', 'pt-BR', 'pt-PT', 'pt-AO', 'pt-MZ',
+  'it', 'it-IT',
+  'nl', 'nl-NL', 'nl-BE',
+  'ru-RU', 'uk-UA', 'be-BY',
+  'pl-PL', 'cs-CZ', 'sk-SK', 'sl-SI',
+  'ro-RO', 'da-DK', 'sv-SE', 'nb', 'no',
+  'fi-FI', 'et-EE', 'lv-LV', 'lt-LT',
+  'el-GR', 'hu-HU', 'bg-BG', 'sr-SR',
+  'hr-HR', 'ca-ES', 'gl-ES',
+  'ja-JP', 'zh-CN', 'ko-KR',
+  'ta-IN', 'km-KH', 'th-TH',
+  'ar', 'fa', 'fa-IR', 'he',
+  'tr-TR', 'id-ID', 'ms-MY',
+  'tl-PH', 'vi-VN',
+]);
 
 function detectLanguage(text) {
   if (/[\u0900-\u097F]/.test(text)) return 'hi';
@@ -15,10 +37,11 @@ function detectLanguage(text) {
   return 'en-US';
 }
 
-async function fetchSuggestions(word, fullText, selStart, selEnd) {
+async function fetchLTSuggestions(fullText, selStart, selEnd) {
   try {
     const lang = detectLanguage(fullText);
-    const params = new URLSearchParams({ text: fullText, language: lang, enabledOnly: 'false' });
+    const ltLang = LT_LANGS.has(lang) ? lang : 'en-US';
+    const params = new URLSearchParams({ text: fullText, language: ltLang, enabledOnly: 'false' });
     const res = await fetch(LT_URL, { method: 'POST', body: params });
     const data = await res.json();
     const matches = data?.matches || [];
@@ -29,10 +52,31 @@ async function fetchSuggestions(word, fullText, selStart, selEnd) {
     const all = overlapping.flatMap((m) =>
       (m.replacements || []).map((r) => r.value)
     ).filter(Boolean);
-    return [...new Set(all)].filter((s) => s !== word).slice(0, 6);
+    return [...new Set(all)].filter((s) => s !== fullText.substring(selStart, selEnd)).slice(0, 6);
   } catch {
     return [];
   }
+}
+
+async function fetchSuggestions(word, fullText, selStart, selEnd) {
+  const lang = detectLanguage(fullText);
+
+  // For Hindi, use client-side Hunspell
+  if (lang === 'hi') {
+    await initSpellcheck();
+    if (!isCorrect(word, 'hi')) {
+      return suggestWord(word, 'hi').filter((s) => s !== word);
+    }
+    return [];
+  }
+
+  // For other Indic languages (ta-IN etc.), try LanguageTool
+  if (LT_LANGS.has(lang)) {
+    return fetchLTSuggestions(fullText, selStart, selEnd);
+  }
+
+  // Fallback: try LanguageTool with derived lang, else en-US
+  return fetchLTSuggestions(fullText, selStart, selEnd);
 }
 
 function findLineBbox(lines, selStart, selEnd) {
@@ -44,7 +88,7 @@ function findLineBbox(lines, selStart, selEnd) {
     if (selStart < lineEnd && selEnd > lineStart) {
       return line.bbox;
     }
-    offset += lineLen + 1; // +1 for the \n joiner
+    offset += lineLen + 1;
   }
   return null;
 }
@@ -188,7 +232,7 @@ export default function SuggestionButton({ textareaRef, imageData, lines }) {
             &ldquo;{word}&rdquo;
           </div>
           <div>
-            {loading && <div className="px-3 py-2 text-xs text-gray-400">Loading...</div>}
+            {loading && <div className="px-3 py-2 text-xs text-gray-400">Loading dictionaries...</div>}
             {!loading && suggestions.length === 0 && (
               <div className="px-3 py-2 text-xs text-gray-400">No alternatives found</div>
             )}
