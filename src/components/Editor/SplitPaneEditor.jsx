@@ -27,7 +27,7 @@ function parseParagraphs(project) {
     });
   }
 
-  if (result.length === 0 && project?.paragraphs && project.paragraphs.length > 0) {
+  if (result.length === 0 && Array.isArray(project?.paragraphs) && project.paragraphs.length > 0) {
     for (const p of project.paragraphs) {
       result.push({
         id: p.id || `p_${index}`,
@@ -109,10 +109,11 @@ function PageGroup({ pageNum, paragraphs, originals, translations, translatingIn
 }
 
 function TranslationPageGroup({ pageNum, paragraphs, translations, onTextChange }) {
-  const hasAny = paragraphs.some((p) => translations[p.index] !== undefined);
+  const paraList = Array.isArray(paragraphs) ? paragraphs : [];
+  const hasAny = paraList.some((p) => translations && translations[p.index] !== undefined);
   if (!hasAny) return null;
 
-  const filename = paragraphs[0]?.filename || '';
+  const filename = paraList[0]?.filename || '';
 
   return (
     <div className="mb-6">
@@ -126,7 +127,7 @@ function TranslationPageGroup({ pageNum, paragraphs, translations, onTextChange 
           </span>
         )}
       </div>
-      {paragraphs.map((p) => {
+      {paraList.map((p) => {
         const t = translations[p.index];
         if (t === undefined) return null;
         const rows = Math.max(2, t.split('\n').length, Math.ceil(t.length / 55));

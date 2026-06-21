@@ -33,9 +33,9 @@ export default function App() {
     try {
       let project;
 
-      if (typeof result === 'object' && result.paragraphs) {
+      if (typeof result === 'object' && result.paragraphs && Array.isArray(result.paragraphs)) {
         const htmlContent = result.paragraphs
-          .map((p) => `<p data-page="${p.page}">${p.text}</p>`)
+          .map((p) => `<p data-page="${p.page}" data-filename="${p.filename || ''}">${p.text}</p>`)
           .join('\n');
 
         project = await saveProject({
