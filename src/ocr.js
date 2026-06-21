@@ -1,5 +1,3 @@
-// Client-side OCR using Tesseract.js (WebAssembly, runs entirely in browser)
-
 import { createWorker } from 'tesseract.js';
 
 let worker = null;
@@ -28,9 +26,7 @@ export async function ocrImage(imageFile, onProgressFn) {
   const w = await getWorker();
   const { data } = await w.recognize(imageFile);
 
-  // Extract paragraphs from the result
   const paragraphs = [];
-  let currentPara = [];
 
   for (const block of data.blocks || []) {
     for (const para of block.paragraphs || []) {
@@ -41,7 +37,6 @@ export async function ocrImage(imageFile, onProgressFn) {
     }
   }
 
-  // Fallback: split raw text into paragraphs
   if (paragraphs.length === 0 && data.text) {
     const lines = data.text.split('\n').filter((l) => l.trim());
     let current = [];
@@ -73,10 +68,10 @@ export async function ocrMultipleImages(files, onProgress) {
       const result = await ocrImage(file, (p) => {
         onProgress({ current: i + 1, total: files.length, file: file.name, phase: 'ocr', percent: p });
       });
-      results.push({ filename: file.name, ...result });
+      results.push({ filename: file.name, page: i + 1, ...result });
     } catch (err) {
       console.error(`OCR failed for ${file.name}:`, err);
-      results.push({ filename: file.name, text: '', paragraphs: [], wordCount: 0, error: err.message });
+      results.push({ filename: file.name, page: i + 1, text: '', paragraphs: [], wordCount: 0, error: err.message });
     }
   }
   return results;

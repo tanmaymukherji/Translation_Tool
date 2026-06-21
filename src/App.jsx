@@ -13,7 +13,6 @@ export default function App() {
   const [error, setError] = useState(null);
   const [view, setView] = useState('library');
   const [showSettings, setShowSettings] = useState(false);
-  const [progress, setProgress] = useState(null);
 
   useEffect(() => {
     loadProjects();
@@ -31,21 +30,20 @@ export default function App() {
   const handleProjectResult = useCallback(async (result) => {
     setLoading(true);
     setError(null);
-    setProgress(null);
     try {
       let project;
 
       if (typeof result === 'object' && result.paragraphs) {
-        // OCR result from FolderImporter
         const htmlContent = result.paragraphs
-          .map((p) => `<p>${p}</p>`)
+          .map((p) => `<p data-page="${p.page}">${p.text}</p>`)
           .join('\n');
 
         project = await saveProject({
           name: result.name || 'Untitled',
           folder_path: result.folder || '',
           content: htmlContent,
-          paragraphs: result.paragraphs.length,
+          paragraphs: result.paragraphs,
+          total_paragraphs: result.paragraphs.length,
         });
       } else if (typeof result === 'object' && result.id) {
         project = result;
@@ -68,11 +66,11 @@ export default function App() {
     setView('editor');
   };
 
-  const handleSaveContent = async (content) => {
+  const handleSaveContent = async (content, extraData) => {
     if (!activeProject) return;
     setLoading(true);
     try {
-      const updated = await saveProject({ ...activeProject, content });
+      const updated = await saveProject({ ...activeProject, content, ...extraData });
       setActiveProject(updated);
       await loadProjects();
     } catch (err) {
@@ -112,25 +110,6 @@ export default function App() {
           <FolderImporter onImport={handleProjectResult} disabled={loading} />
         </div>
       </header>
-
-      {/* Progress bar */}
-      {progress && (
-        <div className="bg-blue-100 text-blue-800 px-4 py-1 text-xs flex items-center gap-2">
-          <div className="flex-1 bg-blue-200 rounded-full h-2">
-            <div
-              className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-              style={{ width: `${Math.round((progress.current / progress.total) * 100)}%` }}
-            />
-          </div>
-          <span>
-            {progress.phase === 'ocr'
-              ? `OCR: ${progress.current}/${progress.total} (${progress.file})`
-              : progress.phase === 'translate'
-              ? `Translating...`
-              : ''}
-          </span>
-        </div>
-      )}
 
       <ErrorBanner error={error} onDismiss={() => setError(null)} />
 

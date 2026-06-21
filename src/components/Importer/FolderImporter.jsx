@@ -1,16 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { ocrMultipleImages, terminateWorker } from '../../ocr';
 
-/**
- * FolderImporter - handles importing images via:
- * 1. File System Access API (folder picker) - Chrome/Edge
- * 2. Standard file upload (multi-select) - all browsers
- * 
- * Runs OCR entirely in the browser using Tesseract.js.
- */
 export default function FolderImporter({ onImport, disabled }) {
   const [busy, setBusy] = useState(false);
-  const [mode, setMode] = useState(null);
   const fileInputRef = useRef(null);
 
   const processFiles = async (files, folderName) => {
@@ -21,38 +13,34 @@ export default function FolderImporter({ onImport, disabled }) {
       );
 
       if (imageFiles.length === 0) {
-        alert('No PNG, JPG, or TIFF images found in the selected files.');
+        alert('No PNG, JPG, or TIFF images found.');
         setBusy(false);
         return;
       }
 
-      // Set up progress callback
-      const onProgress = (p) => {
-        // Progress is handled via the callback to App
-      };
+      const results = await ocrMultipleImages(imageFiles, () => {});
 
-      // Run OCR
-      const results = await ocrMultipleImages(imageFiles, (p) => {});
-
-      // Collect all paragraphs
       const allParagraphs = [];
+      let paragraphIndex = 0;
       for (const r of results) {
         if (r.error) {
           console.warn(`OCR error for ${r.filename}: ${r.error}`);
         }
-        for (const p of r.paragraphs) {
-          if (p.trim()) allParagraphs.push(p.trim());
+        for (const text of r.paragraphs) {
+          if (text.trim()) {
+            allParagraphs.push({
+              id: `para_${paragraphIndex}`,
+              index: paragraphIndex,
+              page: r.page,
+              text: text.trim(),
+            });
+            paragraphIndex++;
+          }
         }
       }
 
       if (allParagraphs.length === 0) {
-        alert(
-          'No text could be extracted from the images. ' +
-          'This may happen if:\n' +
-          '- The images contain no readable text\n' +
-          '- Tesseract.js failed to load (check browser console)\n' +
-          '- The image format is not supported'
-        );
+        alert('No text could be extracted from the images.');
         setBusy(false);
         return;
       }
@@ -63,7 +51,6 @@ export default function FolderImporter({ onImport, disabled }) {
         name,
         folder: folderName || 'upload',
         paragraphs: allParagraphs,
-        results,
       });
     } catch (err) {
       console.error('Import failed:', err);
@@ -74,24 +61,19 @@ export default function FolderImporter({ onImport, disabled }) {
   };
 
   const handleFolderSelect = async () => {
-    // File System Access API - Chrome/Edge only
     try {
       const handle = await window.showDirectoryPicker();
       const files = [];
       for await (const entry of handle.values()) {
         if (entry.kind === 'file' && /\.(png|jpe?g|tiff?)$/i.test(entry.name)) {
           const file = await entry.getFile();
-          // Preserve the original file name
           Object.defineProperty(file, 'name', { value: entry.name });
           files.push(file);
         }
       }
       await processFiles(files, handle.name);
     } catch (err) {
-      if (err.name === 'AbortError' || err.name === 'SecurityError') {
-        return; // User cancelled or permission denied
-      }
-      // Fallback to file input
+      if (err.name === 'AbortError' || err.name === 'SecurityError') return;
       console.warn('Folder picker not supported, falling back to file upload:', err.message);
       fileInputRef.current?.click();
     }
@@ -101,7 +83,7 @@ export default function FolderImporter({ onImport, disabled }) {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     await processFiles(files, 'Uploaded Images');
-    e.target.value = ''; // Reset so same files can be re-selected
+    e.target.value = '';
   };
 
   return (
