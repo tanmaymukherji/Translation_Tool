@@ -12,6 +12,7 @@ export function onProgress(cb) {
 async function getWorker() {
   if (worker) return worker;
   worker = await createWorker('hin+eng+san', 1, {
+    cacheMethod: 'none',
     logger: (m) => {
       if (m.status === 'recognizing text' && progressCallback) {
         progressCallback(m.progress);
