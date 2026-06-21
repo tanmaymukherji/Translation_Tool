@@ -1,13 +1,17 @@
 // Configuration for Translation Tool
 // All API keys and settings in one place.
 
+function getLS(key, fallback = '') {
+  try { return localStorage.getItem(key) || fallback } catch { return fallback }
+}
+
 const CONFIG = {
   // Hugging Face Inference API key (set via Settings panel, persisted in localStorage)
   // Uses the @huggingface/inference client which routes through router.huggingface.co
-  HUGGINGFACE_API_KEY: localStorage.getItem('hf_api_key') || '',
+  HUGGINGFACE_API_KEY: getLS('hf_api_key'),
 
   // Bhashini API
-  BHASHINI_API_KEY: localStorage.getItem('bhashini_api_key') || '',
+  BHASHINI_API_KEY: getLS('bhashini_api_key'),
   BHASHINI_API_URL: 'https://api.bhashini.gov.in/v2',
 
   // Tesseract OCR languages

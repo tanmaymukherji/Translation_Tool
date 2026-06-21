@@ -1,10 +1,46 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Component } from 'react';
 import DocumentLibrary from './components/Library/DocumentLibrary';
 import SplitPaneEditor from './components/Editor/SplitPaneEditor';
 import FolderImporter from './components/Importer/FolderImporter';
 import SettingsPanel from './components/SettingsPanel';
 import ErrorBanner from './components/ErrorBanner';
 import { listProjects, saveProject } from './storage';
+
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null, info: '' };
+  }
+  static getDerivedStateFromError(error) {
+    return { error: error?.message || String(error), info: error?.stack || '' };
+  }
+  componentDidCatch(error, info) {
+    console.error('App error:', error, info);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="h-screen flex items-center justify-center bg-gray-100">
+          <div className="bg-white p-8 rounded-lg shadow-xl max-w-md">
+            <h2 className="text-lg font-bold text-red-700 mb-2">Something went wrong</h2>
+            <p className="text-sm text-gray-600 mb-4 whitespace-pre-wrap">{this.state.error}</p>
+            <details className="text-xs text-gray-500">
+              <summary className="cursor-pointer hover:text-gray-700">Stack trace</summary>
+              <pre className="mt-2 p-2 bg-gray-100 rounded overflow-auto max-h-60">{this.state.info}</pre>
+            </details>
+            <button
+              onClick={() => { this.setState({ error: null, info: '' }); window.location.reload(); }}
+              className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+            >
+              Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function App() {
   const [projects, setProjects] = useState([]);
@@ -81,6 +117,7 @@ export default function App() {
   };
 
   return (
+    <ErrorBoundary>
     <div className="h-screen flex flex-col">
       <header className="bg-slate-800 text-white px-6 py-3 flex items-center justify-between shadow-md">
         <div className="flex items-center gap-4">
@@ -132,5 +169,6 @@ export default function App() {
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
     </div>
+    </ErrorBoundary>
   );
 }
