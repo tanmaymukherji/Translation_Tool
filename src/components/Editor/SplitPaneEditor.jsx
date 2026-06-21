@@ -228,12 +228,14 @@ export default function SplitPaneEditor({ project, onSave, loading }) {
   }, [originals]);
 
   const handleExportDocx = async () => {
-    const allParagraphs = paragraphs.map((p) => {
-      return translations[p.index] || originals[p.index] || p.text;
-    });
+    const exportData = paragraphs.map((p) => ({
+      page: p.page,
+      text: originals[p.index] || p.text,
+      translated: translations[p.index],
+    }));
     try {
       const filename = `${project.name || 'translation'}_${targetLang}.docx`;
-      await generateDocx(allParagraphs, filename);
+      await generateDocx(exportData, filename);
     } catch (err) {
       setError('Export failed: ' + err.message);
     }

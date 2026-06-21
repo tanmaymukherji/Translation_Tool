@@ -15,9 +15,54 @@ async function getWorker() {
       if (m.status === 'recognizing text' && progressCallback) {
         progressCallback(m.progress);
       }
+      if (m.status === 'loading tesseract core' && progressCallback) {
+        progressCallback(0);
+      }
     },
   });
+  await worker.setParameters({
+    tessedit_pageseg_mode: '3', // PSM_AUTO – automatic page segmentation
+  });
   return worker;
+}
+
+function groupLinesIntoParagraphs(lines) {
+  if (!lines || lines.length === 0) return [];
+
+  const paragraphs = [];
+  let current = [];
+  let prevBottom = null;
+
+  for (const line of lines) {
+    const text = (line.text || '').trim();
+    if (!text) continue;
+
+    const bbox = line.bbox;
+    const lineTop = bbox ? bbox.y0 : 0;
+    const lineBottom = bbox ? bbox.y1 : 0;
+
+    if (prevBottom !== null && bbox) {
+      const gap = lineTop - prevBottom;
+      const lineHeight = lineBottom - lineTop;
+
+      // If gap is more than 1.5x the line height, it's a new paragraph
+      if (gap > lineHeight * 1.5) {
+        if (current.length > 0) {
+          paragraphs.push(current.join('\n').trim());
+          current = [];
+        }
+      }
+    }
+
+    current.push(text);
+    if (bbox) prevBottom = lineBottom;
+  }
+
+  if (current.length > 0) {
+    paragraphs.push(current.join('\n').trim());
+  }
+
+  return paragraphs;
 }
 
 export async function ocrImage(imageFile, onProgressFn) {
@@ -26,30 +71,76 @@ export async function ocrImage(imageFile, onProgressFn) {
   const w = await getWorker();
   const { data } = await w.recognize(imageFile);
 
-  const paragraphs = [];
+  let paragraphs = [];
 
-  for (const block of data.blocks || []) {
-    for (const para of block.paragraphs || []) {
-      const text = para.text?.trim();
-      if (text) {
-        paragraphs.push(text);
+  // Strategy 1: Use Tesseract's paragraph detection with preserved line breaks
+  if (data.blocks && data.blocks.length > 0) {
+    for (const block of data.blocks) {
+      if (!block.paragraphs) continue;
+      for (const para of block.paragraphs) {
+        if (!para.lines || para.lines.length === 0) {
+          const text = para.text?.trim();
+          if (text) paragraphs.push(text);
+        } else {
+          const lines = para.lines
+            .map((l) => (l.text || '').trim())
+            .filter(Boolean);
+          if (lines.length > 0) {
+            paragraphs.push(lines.join('\n'));
+          }
+        }
       }
     }
   }
 
-  if (paragraphs.length === 0 && data.text) {
-    const lines = data.text.split('\n').filter((l) => l.trim());
-    let current = [];
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed === '' && current.length > 0) {
-        paragraphs.push(current.join(' '));
-        current = [];
-      } else if (trimmed) {
-        current.push(trimmed);
+  // Strategy 2: Fall back to line-level paragraph grouping
+  if (paragraphs.length <= 1 && data.blocks) {
+    const allLines = [];
+    for (const block of data.blocks) {
+      if (block.paragraphs) {
+        for (const para of block.paragraphs) {
+          if (para.lines) allLines.push(...para.lines);
+        }
       }
     }
-    if (current.length > 0) paragraphs.push(current.join(' '));
+    const grouped = groupLinesIntoParagraphs(allLines);
+    if (grouped.length > 0) {
+      paragraphs = grouped;
+    }
+  }
+
+  // Strategy 3: Last resort – split data.text by blank lines
+  if (paragraphs.length <= 1 && data.text) {
+    const raw = data.text;
+    const parts = raw.split(/\n\s*\n/);
+    const filtered = parts.map((p) => p.replace(/\n/g, ' ').trim()).filter(Boolean);
+    if (filtered.length > 1) {
+      paragraphs = filtered;
+    } else {
+      // Single block: keep internal line breaks
+      const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+      if (lines.length > 1) {
+        // Try to detect paragraph boundaries from short lines or indentation
+        let groups = [];
+        let cur = [];
+        for (const line of lines) {
+          const isShort = line.length < 30;
+          const isIndented = line.length > 0 && line[0] === ' ';
+          if (isShort && cur.length > 0) {
+            cur.push(line);
+            groups.push(cur.join('\n'));
+            cur = [];
+          } else {
+            cur.push(line);
+          }
+        }
+        if (cur.length > 0) groups.push(cur.join('\n'));
+        if (groups.length >= 1) paragraphs = groups;
+        else paragraphs = [raw.replace(/\n/g, ' ').trim()];
+      } else {
+        paragraphs = [raw.trim()];
+      }
+    }
   }
 
   return {
