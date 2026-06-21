@@ -78,7 +78,7 @@ export default function App() {
           name: result.name || 'Untitled',
           folder_path: result.folder || '',
           content: htmlContent,
-          paragraphs: result.paragraphs,
+          paragraphsArray: result.paragraphs,
           total_paragraphs: result.paragraphs.length,
         });
       } else if (typeof result === 'object' && result.id) {

@@ -25,7 +25,7 @@ export default function DocumentLibrary({ projects, onSelect, onRefresh }) {
               <p className="text-xs text-gray-400 mt-1 truncate">{p.folder_path}</p>
               <div className="mt-2 flex gap-1 flex-wrap">
                 <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded">Original</span>
-                <span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded">{p.paragraphs} paragraphs</span>
+                <span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded">{p.total_paragraphs ?? (Array.isArray(p.paragraphs) ? p.paragraphs.length : p.paragraphs ?? 0)} paragraphs</span>
               </div>
             </div>
           ))}

@@ -27,8 +27,9 @@ function parseParagraphs(project) {
     });
   }
 
-  if (result.length === 0 && Array.isArray(project?.paragraphs) && project.paragraphs.length > 0) {
-    for (const p of project.paragraphs) {
+  const paraField = project?.paragraphsArray || project?.paragraphs;
+  if (result.length === 0 && Array.isArray(paraField) && paraField.length > 0) {
+    for (const p of paraField) {
       result.push({
         id: p.id || `p_${index}`,
         index,
