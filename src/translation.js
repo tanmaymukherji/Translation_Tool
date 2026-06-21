@@ -1,4 +1,3 @@
-import { InferenceClient } from '@huggingface/inference';
 import CONFIG from './config';
 
 const MYMEMORY_URL = 'https://api.mymemory.translated.net/get';
@@ -39,12 +38,8 @@ function isSanskrit(text) {
   return text.length > 0 && devanagari / text.length > 0.3;
 }
 
-function getHFClient() {
-  const apiKey = localStorage.getItem('hf_api_key') || '';
-  return new InferenceClient(apiKey);
-}
-
-const MYMEMORY_MAX_CHARS = 500;
+const MYMEMORY_MAX_CHARS = 300; // safely under 500-char limit after URL encoding
+const HF_ROUTER_URL = 'https://router.huggingface.co/hf-inference/models';
 
 function splitIntoChunks(text, maxLen) {
   if (text.length <= maxLen) return [text];
@@ -113,14 +108,31 @@ async function translateLibre(text, tgtLang) {
   return result.translatedText || '';
 }
 
+async function hfFetch(modelId, body) {
+  const apiKey = localStorage.getItem('hf_api_key') || '';
+  const url = `${HF_ROUTER_URL}/${modelId}`;
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+  const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+  if (response.status === 503) {
+    await new Promise((r) => setTimeout(r, 8000));
+    return hfFetch(modelId, body);
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`HF error (${response.status}): ${text}`);
+  }
+  const result = await response.json();
+  if (Array.isArray(result)) {
+    return result[0]?.translation_text || result[0]?.generated_text || String(result[0] || '');
+  }
+  return String(result.translation_text || result.generated_text || result);
+}
+
 async function translateOpusMT(text, tgtLang) {
   const modelId = `Helsinki-NLP/opus-mt-en-${tgtLang}`;
-  const client = getHFClient();
-  const result = await client.translation({
-    inputs: text,
-    model: modelId,
-  });
-  return result.translation_text || '';
+  return hfFetch(modelId, { inputs: text });
 }
 
 async function translateIndicTrans2(text, srcLang, tgtLang) {
@@ -132,13 +144,7 @@ async function translateIndicTrans2(text, srcLang, tgtLang) {
   else if (tgt === 'eng_Latn') modelId = CONFIG.INDICTRANS2_MODELS['indic-en'];
   else modelId = CONFIG.INDICTRANS2_MODELS['indic-indic'];
 
-  const client = getHFClient();
-  const result = await client.translation({
-    inputs: text,
-    model: modelId,
-    parameters: { src_lang: src, tgt_lang: tgt },
-  });
-  return result.translation_text || '';
+  return hfFetch(modelId, { inputs: text, parameters: { src_lang: src, tgt_lang: tgt } });
 }
 
 export async function translateHF(text, srcLang, tgtLang, apiKey) {
