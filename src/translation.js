@@ -1,6 +1,7 @@
 import CONFIG from './config';
 
 const MYMEMORY_URL = 'https://api.mymemory.translated.net/get';
+const GOOGLE_URL = 'https://translate.googleapis.com/translate_a/single';
 
 const LANG_MAP = {
   bn: 'bn', hi: 'hi', ta: 'ta', te: 'te', mr: 'mr',
@@ -38,8 +39,7 @@ function isSanskrit(text) {
   return text.length > 0 && devanagari / text.length > 0.3;
 }
 
-const MYMEMORY_MAX_CHARS = 300; // safely under 500-char limit after URL encoding
-const HF_ROUTER_URL = 'https://router.huggingface.co/hf-inference/models';
+const MYMEMORY_MAX_CHARS = 300;
 
 function splitIntoChunks(text, maxLen) {
   if (text.length <= maxLen) return [text];
@@ -59,12 +59,29 @@ function splitIntoChunks(text, maxLen) {
   return chunks;
 }
 
+function delay(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function translateGoogle(text, tgtLang) {
+  const src = detectLanguage(text);
+  const url = `${GOOGLE_URL}?client=gtx&sl=${src}&tl=${tgtLang}&dt=t&q=${encodeURIComponent(text)}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Google error (${response.status})`);
+  const result = await response.json();
+  const translated = (result[0] || []).map((seg) => seg[0] || '').join('');
+  if (!translated) throw new Error('Google returned empty result');
+  return translated;
+}
+
 async function translateMyMemory(text, tgtLang) {
   const src = detectLanguage(text);
   const langpair = `${src}|${tgtLang}`;
   const chunks = splitIntoChunks(text, MYMEMORY_MAX_CHARS);
 
-  const translated = await Promise.all(chunks.map(async (chunk) => {
+  const translated = [];
+  for (const chunk of chunks) {
+    await delay(200);
     const response = await fetch(MYMEMORY_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -77,8 +94,8 @@ async function translateMyMemory(text, tgtLang) {
     if (result.responseStatus !== 200) {
       throw new Error(`MyMemory error: ${result.responseDetails || result.responseStatus}`);
     }
-    return result.responseData?.translatedText || '';
-  }));
+    translated.push(result.responseData?.translatedText || '');
+  }
 
   return translated.join(' ');
 }
@@ -87,42 +104,47 @@ async function translateLibre(text, tgtLang) {
   const src = detectLanguage(text);
   const apiKey = localStorage.getItem('libretranslate_api_key') || '';
 
+  const body = {
+    q: text,
+    source: src,
+    target: tgtLang,
+    format: 'text',
+  };
+  if (apiKey) body.api_key = apiKey;
+
   const response = await fetch('https://libretranslate.com/translate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      q: text,
-      source: src,
-      target: tgtLang,
-      format: 'text',
-      api_key: apiKey || undefined,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`LibreTranslate error (${response.status}): ${body}`);
+    const bodyText = await response.text().catch(() => '');
+    throw new Error(`LibreTranslate error (${response.status}): ${bodyText}`);
   }
 
   const result = await response.json();
   return result.translatedText || '';
 }
 
-async function hfFetch(modelId, body) {
-  const apiKey = localStorage.getItem('hf_api_key') || '';
-  const url = `${HF_ROUTER_URL}/${modelId}`;
+async function hfFetch(modelId, body, apiKey) {
+  const key = apiKey || localStorage.getItem('hf_api_key') || '';
+  const url = `https://api-inference.huggingface.co/models/${modelId}`;
   const headers = { 'Content-Type': 'application/json' };
-  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  if (key) headers['Authorization'] = `Bearer ${key}`;
 
   const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+
   if (response.status === 503) {
-    await new Promise((r) => setTimeout(r, 8000));
-    return hfFetch(modelId, body);
+    await delay(8000);
+    return hfFetch(modelId, body, apiKey);
   }
+
   if (!response.ok) {
     const text = await response.text().catch(() => '');
     throw new Error(`HF error (${response.status}): ${text}`);
   }
+
   const result = await response.json();
   if (Array.isArray(result)) {
     return result[0]?.translation_text || result[0]?.generated_text || String(result[0] || '');
@@ -130,12 +152,12 @@ async function hfFetch(modelId, body) {
   return String(result.translation_text || result.generated_text || result);
 }
 
-async function translateOpusMT(text, tgtLang) {
+async function translateOpusMT(text, tgtLang, apiKey) {
   const modelId = `Helsinki-NLP/opus-mt-en-${tgtLang}`;
-  return hfFetch(modelId, { inputs: text });
+  return hfFetch(modelId, { inputs: text }, apiKey);
 }
 
-async function translateIndicTrans2(text, srcLang, tgtLang) {
+async function translateIndicTrans2(text, srcLang, tgtLang, apiKey) {
   const src = srcLang === 'auto' ? detectLanguage(text) : toIT2Code(srcLang);
   const tgt = toIT2Code(tgtLang);
 
@@ -144,7 +166,7 @@ async function translateIndicTrans2(text, srcLang, tgtLang) {
   else if (tgt === 'eng_Latn') modelId = CONFIG.INDICTRANS2_MODELS['indic-en'];
   else modelId = CONFIG.INDICTRANS2_MODELS['indic-indic'];
 
-  return hfFetch(modelId, { inputs: text, parameters: { src_lang: src, tgt_lang: tgt } });
+  return hfFetch(modelId, { inputs: text, parameters: { src_lang: src, tgt_lang: tgt } }, apiKey);
 }
 
 export async function translateHF(text, srcLang, tgtLang, apiKey) {
@@ -155,6 +177,7 @@ export async function translateHF(text, srcLang, tgtLang, apiKey) {
   const tgt = LANG_MAP[tgtLang];
   let errors = [];
 
+  // 1. MyMemory (free, no key needed)
   if (tgt) {
     try {
       const translation = await translateMyMemory(text, tgt);
@@ -164,6 +187,7 @@ export async function translateHF(text, srcLang, tgtLang, apiKey) {
     }
   }
 
+  // 2. LibreTranslate (free tier without key)
   if (tgt && LIBRE_LANG_MAP[tgtLang]) {
     try {
       const translation = await translateLibre(text, LIBRE_LANG_MAP[tgtLang]);
@@ -173,17 +197,27 @@ export async function translateHF(text, srcLang, tgtLang, apiKey) {
     }
   }
 
+  // 3. Google Translate (free, no key, unofficial API)
+  try {
+    const translation = await translateGoogle(text, tgtLang);
+    if (translation) return { translation };
+  } catch (e) {
+    errors.push(`Google: ${e.message}`);
+  }
+
+  // 4. OPUS-MT via HF Inference API (requires optional HF key)
   if (srcLang === 'auto' || srcLang === 'en') {
     try {
-      const translation = await translateOpusMT(text, tgtLang);
+      const translation = await translateOpusMT(text, tgtLang, apiKey);
       return { translation };
     } catch (e) {
       errors.push(`OPUS-MT: ${e.message}`);
     }
   }
 
+  // 5. IndicTrans2 via HF Inference API (requires optional HF key)
   try {
-    const translation = await translateIndicTrans2(text, srcLang, tgtLang);
+    const translation = await translateIndicTrans2(text, srcLang, tgtLang, apiKey);
     return { translation };
   } catch (e) {
     errors.push(`IndicTrans2: ${e.message}`);
