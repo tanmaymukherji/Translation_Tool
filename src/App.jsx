@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from './api';
 import DocumentLibrary from './components/Library/DocumentLibrary';
 import SplitPaneEditor from './components/Editor/SplitPaneEditor';
 import FolderImporter from './components/Importer/FolderImporter';
 import ErrorBanner from './components/ErrorBanner';
-
-const API_BASE = 'http://localhost:8000';
 
 export default function App() {
   const [projects, setProjects] = useState([]);
@@ -22,28 +20,45 @@ export default function App() {
 
   const checkBackend = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/api/status`);
+      const res = await api.get('/api/status');
       setBackendStatus(res.data);
     } catch (err) {
-      setBackendStatus({ error: 'Backend not reachable at ' + API_BASE });
+      setBackendStatus({ error: 'Backend offline' });
     }
   };
 
   const loadProjects = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/api/projects`);
+      const res = await api.get('/api/projects');
       setProjects(res.data);
     } catch (err) {
       console.error('Failed to load projects:', err);
     }
   };
 
-  const handleImportFolder = async (folderPath) => {
+  /**
+   * Called after OCR is complete (either via Import Folder or Upload Images).
+   * Accepts either:
+   *   - A string (folder_path) -> then calls /api/import
+   *   - An object (project) -> uses directly
+   */
+  const handleImportComplete = async (result) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await axios.post(`${API_BASE}/api/import`, { folder_path: folderPath });
-      const project = res.data;
+      let project;
+
+      if (typeof result === 'string') {
+        // Folder path was provided - call import endpoint
+        const res = await api.post('/api/import', { folder_path: result });
+        project = res.data;
+      } else if (result && result.id) {
+        // Project object was returned directly (from upload endpoint)
+        project = result;
+      } else {
+        throw new Error('Invalid import result');
+      }
+
       setProjects((prev) => {
         const exists = prev.find((p) => p.id === project.id);
         return exists ? prev.map((p) => (p.id === project.id ? project : p)) : [...prev, project];
@@ -51,7 +66,7 @@ export default function App() {
       setActiveProject(project);
       setView('editor');
     } catch (err) {
-      setError(err.response?.data?.detail || 'Import failed: ' + err.message);
+      setError(err.friendlyMessage || err.response?.data?.detail || 'Import failed: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -66,13 +81,13 @@ export default function App() {
     if (!activeProject) return;
     setLoading(true);
     try {
-      const res = await axios.post(`${API_BASE}/api/save`, {
+      const res = await api.post('/api/save', {
         docx_path: activeProject.docx_path,
         content: activeProject.content,
       });
       setActiveProject({ ...activeProject, ...res.data });
     } catch (err) {
-      setError(err.response?.data?.detail || 'Save failed');
+      setError(err.friendlyMessage || err.response?.data?.detail || 'Save failed');
     } finally {
       setLoading(false);
     }
@@ -82,14 +97,14 @@ export default function App() {
     if (!activeProject) return;
     setLoading(true);
     try {
-      const res = await axios.post(`${API_BASE}/api/save-translation`, {
+      const res = await api.post('/api/save-translation', {
         docx_path: activeProject.docx_path,
         content: translatedContent,
         target_lang: lang,
       });
       setActiveProject({ ...activeProject, ...res.data });
     } catch (err) {
-      setError(err.response?.data?.detail || 'Save translation failed');
+      setError(err.friendlyMessage || err.response?.data?.detail || 'Save translation failed');
     } finally {
       setLoading(false);
     }
@@ -108,9 +123,14 @@ export default function App() {
           </button>
         </div>
         <div className="flex items-center gap-3">
-          {backendStatus && !backendStatus.error && !backendStatus.tesseract && (
-            <span className="text-amber-300 text-xs px-2 py-1 bg-amber-800 rounded" title="Install Tesseract OCR for text extraction">
-              ⚠ Tesseract not found
+          {backendStatus && !backendStatus.error && backendStatus.tesseract === false && (
+            <span className="text-amber-300 text-xs px-2 py-1 bg-amber-800 rounded">
+              Installing Tesseract... (first run only)
+            </span>
+          )}
+          {backendStatus && backendStatus.error && (
+            <span className="text-red-300 text-xs px-2 py-1 bg-red-800 rounded">
+              Backend offline
             </span>
           )}
           {activeProject && (
@@ -119,7 +139,7 @@ export default function App() {
               {loading ? 'Saving...' : 'Save'}
             </button>
           )}
-          <FolderImporter onImport={handleImportFolder} disabled={loading} />
+          <FolderImporter onImport={handleImportComplete} disabled={loading} />
         </div>
       </header>
 

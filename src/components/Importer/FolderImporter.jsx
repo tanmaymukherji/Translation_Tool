@@ -1,20 +1,18 @@
-import React, { useState, useRef } from 'react';
-import axios from 'axios';
-
-const API_BASE = 'http://localhost:8000';
+import React, { useRef } from 'react';
+import api from '../../api';
 
 export default function FolderImporter({ onImport, disabled }) {
-  const [mode, setMode] = useState(null);
   const fileInputRef = useRef(null);
 
   const handleFolderClick = async () => {
     if (window.electronAPI && window.electronAPI.selectFolder) {
       const folder = await window.electronAPI.selectFolder();
       if (folder) onImport(folder);
-    } else {
-      const folder = prompt('Enter full folder path containing scanned images:');
-      if (folder) onImport(folder);
+      return;
     }
+    // Fallback: prompt for path (only works when backend runs on same machine)
+    const folder = prompt('Enter full folder path containing scanned images:');
+    if (folder) onImport(folder);
   };
 
   const handleFileSelect = async (e) => {
@@ -25,12 +23,13 @@ export default function FolderImporter({ onImport, disabled }) {
     files.forEach((file) => formData.append('images', file));
 
     try {
-      const res = await axios.post(`${API_BASE}/api/upload`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      onImport(res.data.folder_path);
+      // Do NOT set Content-Type header - axios auto-sets it with boundary for FormData
+      const res = await api.post('/api/upload', formData);
+      // Upload endpoint returns the project directly - pass to onImport
+      onImport(res.data);
     } catch (err) {
-      alert('Upload failed: ' + (err.response?.data?.detail || err.message));
+      const message = err.friendlyMessage || err.response?.data?.detail || err.message;
+      alert('Upload failed:\n\n' + message);
     }
   };
 

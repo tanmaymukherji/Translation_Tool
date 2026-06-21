@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import axios from 'axios';
-
-const API_BASE = 'http://localhost:8000';
+import api from '../../api';
 
 const LANGUAGES = [
   { code: 'bn', name: 'Bengali' },
@@ -73,13 +71,13 @@ export default function SplitPaneEditor({ project, onSave, onSaveTranslation, lo
     try {
       let res;
       if (provider === 'huggingface') {
-        res = await axios.post(`${API_BASE}/api/translate/hf`, {
+        res = await api.post('/api/translate/hf', {
           text: paragraph.text,
           src_lang: 'auto',
           tgt_lang: targetLang,
         });
       } else {
-        res = await axios.post(`${API_BASE}/api/translate/bhashini`, {
+        res = await api.post('/api/translate/bhashini', {
           text: paragraph.text,
           src_lang: 'auto',
           tgt_lang: targetLang,
