@@ -55,6 +55,18 @@ function ZoomableImage({ src, alt, focusBox }) {
     ? Math.min(dims.cw / dims.iw, dims.ch / dims.ih, 1)
     : 1;
 
+  const clampPan = useCallback((x, y, z) => {
+    const zf = z || zoom;
+    const effectiveW = dims.iw * zf;
+    const effectiveH = dims.ih * zf;
+    const maxX = Math.max(0, (effectiveW - dims.cw) / 2);
+    const maxY = Math.max(0, (effectiveH - dims.ch) / 2);
+    return {
+      x: Math.max(-maxX, Math.min(maxX, x)),
+      y: Math.max(-maxY, Math.min(maxY, y)),
+    };
+  }, [dims, zoom]);
+
   // Non-passive wheel listener to allow preventDefault
   useEffect(() => {
     const el = containerRef.current;
@@ -107,18 +119,6 @@ function ZoomableImage({ src, alt, focusBox }) {
     setZoom(newZoom);
     setPan({ x: newPanX, y: newPanY });
   }, [focusBox, loaded, dims, fitZoom]);
-
-  const clampPan = useCallback((x, y, z) => {
-    const zf = z || zoom;
-    const effectiveW = dims.iw * zf;
-    const effectiveH = dims.ih * zf;
-    const maxX = Math.max(0, (effectiveW - dims.cw) / 2);
-    const maxY = Math.max(0, (effectiveH - dims.ch) / 2);
-    return {
-      x: Math.max(-maxX, Math.min(maxX, x)),
-      y: Math.max(-maxY, Math.min(maxY, y)),
-    };
-  }, [dims, zoom]);
 
   const handleMouseDown = useCallback((e) => {
     if (zoom > fitZoom * 1.05) {
