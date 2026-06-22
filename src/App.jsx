@@ -135,7 +135,14 @@ export default function App() {
   };
 
   const handleSaveOcr = async (updatedParagraphs) => {
-    if (!activeProject) return;
+    if (!activeProject) { return false; }
+    console.log('[handleSaveOcr] START', {
+      projectId: activeProject.id,
+      beforeParagraphsCount: activeProject.paragraphsArray?.length,
+      beforeContentLength: activeProject.content?.length,
+      incomingCount: updatedParagraphs?.length,
+      incomingSample: updatedParagraphs?.slice(0, 2).map(p => ({ i: p.index, t: p.text })),
+    });
     setLoading(true);
     try {
       const htmlContent = updatedParagraphs
@@ -149,14 +156,24 @@ export default function App() {
           return `<p data-page="${p.page}" data-filename="${p.filename || ''}">${p.text}</p>`;
         })
         .join('\n');
+      console.log('[handleSaveOcr] generated HTML length:', htmlContent.length, 'first 100:', htmlContent.substring(0, 100));
       const updated = await saveProject({
         ...activeProject,
         content: htmlContent,
         paragraphsArray: updatedParagraphs,
       });
+      console.log('[handleSaveOcr] saveProject returned', {
+        id: updated.id,
+        paragraphsCount: updated.paragraphsArray?.length,
+        paragraphsSample: updated.paragraphsArray?.slice(0, 2).map(p => ({ i: p.index, t: p.text })),
+      });
       setActiveProject(updated);
+      console.log('[handleSaveOcr] DONE - activeProject updated');
+      return true;
     } catch (err) {
+      console.error('[handleSaveOcr] ERROR:', err);
       setError('Save failed: ' + err.message);
+      return false;
     } finally {
       setLoading(false);
     }

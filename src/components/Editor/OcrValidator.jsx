@@ -205,6 +205,10 @@ function ZoomableImage({ src, alt, focusBox }) {
 }
 
 export default function OcrValidator({ images, paragraphs, onSaveParagraphs }) {
+  console.log('[OcrValidator] RENDER', {
+    paragraphsCount: paragraphs?.length,
+    paragraphsSample: paragraphs?.slice(0, 2).map(p => ({ i: p.index, t: p.text?.substring(0, 30) })),
+  });
   const pages = [...new Set(paragraphs.map((p) => p.page))].sort((a, b) => a - b);
 
   const [currentPage, setCurrentPage] = useState(pages.length > 0 ? pages[0] : 1);
@@ -241,7 +245,13 @@ export default function OcrValidator({ images, paragraphs, onSaveParagraphs }) {
 
   const getText = (para) => edited[para.index] !== undefined ? edited[para.index] : para.text;
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    console.log('[OcrValidator] handleSave START', {
+      paragraphsCount: paragraphs.length,
+      paragraphsSample: paragraphs.slice(0, 2).map(p => ({ i: p.index, t: p.text })),
+      editedKeys: Object.keys(edited),
+      editedSample: Object.entries(edited).slice(0, 2),
+    });
     const updated = paragraphs.map((p) => {
       const entry = { ...p, text: edited[p.index] !== undefined ? edited[p.index] : p.text };
       if (p.type === 'table' && edited[p.index] !== undefined) {
@@ -251,8 +261,14 @@ export default function OcrValidator({ images, paragraphs, onSaveParagraphs }) {
       }
       return entry;
     });
-    onSaveParagraphs(updated);
-    setEdited({});
+    console.log('[OcrValidator] handleSave UPDATED', {
+      count: updated.length,
+      sample: updated.slice(0, 2).map(p => ({ i: p.index, t: p.text })),
+    });
+    const success = await onSaveParagraphs(updated);
+    if (success) {
+      setEdited({});
+    }
   };
 
   const hasEdits = Object.keys(edited).length > 0;
