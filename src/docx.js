@@ -26,7 +26,7 @@ export async function generateDocx(paragraphs, filename) {
   const items = [];
   let lastPage = null;
   for (const p of paragraphs) {
-    const text = (p.translated || p.text || '').replace(/<[^>]+>/g, '').trim();
+    const text = (p.translated !== undefined ? p.translated : p.text || '').replace(/<[^>]+>/g, '').trim();
     if (!text) continue;
     items.push({ text, isPageStart: lastPage !== null && p.page !== lastPage });
     lastPage = p.page;

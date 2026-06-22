@@ -148,7 +148,7 @@ function TranslationPageGroup({ pageNum, paragraphs, translations, onTextChange,
         const rows = Math.max(2, t.split('\n').length, Math.ceil(t.length / 55));
         if (!textareaRefs.current[p.index]) textareaRefs.current[p.index] = createRef();
         return (
-          <div key={p.id || p.index} className="mb-2 ml-2">
+          <div key={p.id || p.index} data-para-index={p.index} className="mb-2 ml-2">
             <div className="flex items-center gap-2 mb-0.5">
               <SuggestionButton textareaRef={textareaRefs.current[p.index]} />
               <ReScanButton
@@ -179,6 +179,9 @@ export default function SplitPaneEditor({ project, images, paragraphs: origParag
   const [originals, setOriginals] = useState({});
   const [translations, setTranslations] = useState({});
   const [translatingIndex, setTranslatingIndex] = useState(null);
+  const [scrollToIndex, setScrollToIndex] = useState(null);
+  const leftScrollRef = useRef(null);
+  const rightScrollRef = useRef(null);
 
   // Lookup maps for the re-scan feature
   const imageByPage = useMemo(() => {
@@ -224,6 +227,42 @@ export default function SplitPaneEditor({ project, images, paragraphs: origParag
     }
   }, [project]);
 
+  // Sync-scroll left/right panels proportionally
+  useEffect(() => {
+    const left = leftScrollRef.current;
+    const right = rightScrollRef.current;
+    if (!left || !right) return;
+    let syncing = false;
+    const onLeft = () => {
+      if (syncing) return;
+      syncing = true;
+      const pct = left.scrollTop / (left.scrollHeight - left.clientHeight);
+      right.scrollTop = pct * (right.scrollHeight - right.clientHeight);
+      syncing = false;
+    };
+    const onRight = () => {
+      if (syncing) return;
+      syncing = true;
+      const pct = right.scrollTop / (right.scrollHeight - right.clientHeight);
+      left.scrollTop = pct * (left.scrollHeight - left.clientHeight);
+      syncing = false;
+    };
+    left.addEventListener('scroll', onLeft, { passive: true });
+    right.addEventListener('scroll', onRight, { passive: true });
+    return () => {
+      left.removeEventListener('scroll', onLeft);
+      right.removeEventListener('scroll', onRight);
+    };
+  }, [paragraphs, translations]);
+
+  // Auto-scroll right panel to newly translated paragraph
+  useEffect(() => {
+    if (scrollToIndex == null) return;
+    const el = document.querySelector(`[data-para-index="${scrollToIndex}"]`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setScrollToIndex(null);
+  }, [translations, scrollToIndex]);
+
   const pages = useMemo(() => {
     const map = {};
     for (const p of paragraphs) {
@@ -255,6 +294,7 @@ export default function SplitPaneEditor({ project, images, paragraphs: origParag
         ...prev,
         [para.index]: result.translation,
       }));
+      setScrollToIndex(para.index);
     } catch (err) {
       console.error('Translation failed:', err);
       setError(err.message || 'Translation failed');
@@ -271,11 +311,17 @@ export default function SplitPaneEditor({ project, images, paragraphs: origParag
   }, [originals]);
 
   const handleExportDocx = async () => {
-    const exportData = paragraphs.map((p) => ({
-      page: p.page,
-      text: originals[p.index] || p.text,
-      translated: translations[p.index],
-    }));
+    const exportData = paragraphs
+      .filter((p) => {
+        const orig = originals[p.index] !== undefined ? originals[p.index] : p.text;
+        const trans = translations[p.index];
+        return trans !== undefined || (orig || '').trim().length > 0;
+      })
+      .map((p) => ({
+        page: p.page,
+        text: originals[p.index] !== undefined ? originals[p.index] : p.text,
+        translated: translations[p.index],
+      }));
     try {
       const filename = `${project.name || 'translation'}_${targetLang}.docx`;
       await generateDocx(exportData, filename);
@@ -285,10 +331,26 @@ export default function SplitPaneEditor({ project, images, paragraphs: origParag
   };
 
   const handleSave = () => {
-    const html = paragraphs
-      .map((p) => `<p data-page="${p.page}" data-filename="${p.filename || ''}">${originals[p.index] || p.text}</p>`)
-      .join('\n');
-    onSave(html, { translations });
+    const kept = [];
+    const oldToNew = {};
+    for (const p of paragraphs) {
+      const text = originals[p.index] !== undefined ? originals[p.index] : p.text;
+      if ((text || '').trim().length > 0) {
+        oldToNew[p.index] = kept.length;
+        kept.push({ ...p, text });
+      }
+    }
+    const remapped = {};
+    for (const p of kept) {
+      const newIdx = oldToNew[p.index];
+      if (translations[p.index] !== undefined) {
+        remapped[newIdx] = translations[p.index];
+      }
+    }
+    const html = kept.map((p) =>
+      `<p data-page="${p.page}" data-filename="${p.filename || ''}">${p.text}</p>`
+    ).join('\n');
+    onSave(html, { translations: remapped });
   };
 
   return (
@@ -299,7 +361,7 @@ export default function SplitPaneEditor({ project, images, paragraphs: origParag
           <span>Original Document</span>
           <span className="text-xs text-gray-500">{pages.length} pages · {paragraphs.length} paragraphs</span>
         </div>
-        <div className="flex-1 overflow-y-auto p-4">
+        <div ref={leftScrollRef} className="flex-1 overflow-y-auto p-4">
           {pages.map(({ page, paragraphs: pageParas }) => (
             <PageGroup
               key={page}
@@ -379,7 +441,7 @@ export default function SplitPaneEditor({ project, images, paragraphs: origParag
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-4">
+        <div ref={rightScrollRef} className="flex-1 overflow-y-auto p-4">
           {Object.keys(translations).length > 0 ? (
             pages.map(({ page, paragraphs: pageParas }) => (
               <TranslationPageGroup
