@@ -84,6 +84,7 @@ export default function App() {
           paragraphsArray: result.paragraphs,
           total_paragraphs: result.paragraphs.length,
           images: result.images || [],
+          fileHandle: result.fileHandle || null,
         });
       } else if (typeof result === 'object' && result.id) {
         project = result;

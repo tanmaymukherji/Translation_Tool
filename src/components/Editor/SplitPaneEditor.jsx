@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, createRef } from 'react';
 import { translate } from '../../translation';
-import { generateDocx } from '../../docx';
+import { generateDocx, generateDocxBlob } from '../../docx';
 import SmartTextarea from './SmartTextarea';
 import SuggestionButton, { ReScanButton } from './SuggestionButton';
 import CONFIG from '../../config';
@@ -358,9 +358,20 @@ export default function SplitPaneEditor({ project, images, paragraphs: origParag
       }));
     try {
       const filename = `${project.name || 'translation'}_${targetLang}.docx`;
-      await generateDocx(exportData, filename);
+      if ('showSaveFilePicker' in window) {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: filename,
+          types: [{ accept: { 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] } }],
+        });
+        const blob = await generateDocxBlob(exportData);
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+      } else {
+        await generateDocx(exportData, filename);
+      }
     } catch (err) {
-      setError('Export failed: ' + err.message);
+      if (err.name !== 'AbortError') setError('Export failed: ' + err.message);
     }
   };
 

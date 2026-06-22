@@ -23,6 +23,12 @@ function buildParagraphs(items, pageBreaks) {
 }
 
 export async function generateDocx(paragraphs, filename) {
+  const blob = await generateDocxBlob(paragraphs);
+  saveAs(blob, filename);
+  return blob;
+}
+
+export async function generateDocxBlob(paragraphs) {
   const items = [];
   let lastPage = null;
   for (const p of paragraphs) {
@@ -43,9 +49,7 @@ export async function generateDocx(paragraphs, filename) {
     }],
   });
 
-  const blob = await Packer.toBlob(doc);
-  saveAs(blob, filename);
-  return blob;
+  return await Packer.toBlob(doc);
 }
 
 export async function generateDocxFromHtml(htmlContent, filename) {

@@ -5,7 +5,7 @@ export default function DocxImporter({ onImport, disabled }) {
   const [busy, setBusy] = useState(false);
   const fileInputRef = useRef(null);
 
-  const processFile = async (file) => {
+  const processFile = async (file, handle) => {
     setBusy(true);
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -65,6 +65,7 @@ export default function DocxImporter({ onImport, disabled }) {
         folder: file.name,
         paragraphs: allParagraphs,
         isDocx: true,
+        fileHandle: handle || null,
       });
     } catch (err) {
       console.error('DOCX import failed:', err);
@@ -75,7 +76,23 @@ export default function DocxImporter({ onImport, disabled }) {
   };
 
   const handleClick = () => {
-    fileInputRef.current?.click();
+    if ('showOpenFilePicker' in window) {
+      window.showOpenFilePicker({
+        multiple: false,
+        types: [{ accept: { 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] } }],
+      }).then(async ([handle]) => {
+        const file = await handle.getFile();
+        if (!file.name.toLowerCase().endsWith('.docx')) {
+          alert('Please select a .docx file.');
+          return;
+        }
+        await processFile(file, handle);
+      }).catch((err) => {
+        if (err.name !== 'AbortError') fileInputRef.current?.click();
+      });
+    } else {
+      fileInputRef.current?.click();
+    }
   };
 
   const handleFileChange = (e) => {
@@ -86,7 +103,7 @@ export default function DocxImporter({ onImport, disabled }) {
       e.target.value = '';
       return;
     }
-    processFile(file);
+    processFile(file, null);
     e.target.value = '';
   };
 
