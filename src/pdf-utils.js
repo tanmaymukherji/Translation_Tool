@@ -17,19 +17,11 @@ export async function initPdfJs() {
 
 export async function detectTextPdf(pdfDoc) {
   try {
-    let totalItems = 0;
-    let totalChars = 0;
-    const pagesToCheck = Math.min(pdfDoc.numPages, 3);
-    for (let i = 1; i <= pagesToCheck; i++) {
-      const page = await pdfDoc.getPage(i);
-      const content = await page.getTextContent();
-      totalItems += content.items.length;
-      totalChars += content.items.reduce((s, i) => s + (i.str || '').length, 0);
-      page.cleanup();
-    }
-    // If many items, likely hidden OCR text → treat as scanned
-    if (totalItems > 500) return false;
-    return totalChars >= 30;
+    const page = await pdfDoc.getPage(1);
+    const content = await page.getTextContent();
+    const chars = content.items.reduce((s, i) => s + (i.str || '').length, 0);
+    page.cleanup();
+    return chars >= 30;
   } catch {
     return false;
   }
