@@ -80,7 +80,7 @@ function PageGroup({ pageNum, paragraphs, originals, translations, translatingIn
         const rows = Math.max(2, text.split('\n').length, Math.ceil(text.length / 55));
         if (!textareaRefs.current[p.index]) textareaRefs.current[p.index] = createRef();
         return (
-          <div key={p.id || p.index} className="mb-2 ml-2">
+          <div key={p.id || p.index} data-para-index={p.index} className="mb-2 ml-2">
             <div className="flex items-center gap-2 mb-0.5">
               <SuggestionButton textareaRef={textareaRefs.current[p.index]} />
               <ReScanButton
@@ -228,26 +228,45 @@ export default function SplitPaneEditor({ project, images, paragraphs: origParag
     }
   }, [project]);
 
-  // Sync-scroll left/right panels proportionally
+  // Scroll left/right panels together by matching paragraph index
   useEffect(() => {
     const left = leftScrollRef.current;
     const right = rightScrollRef.current;
     if (!left || !right) return;
-    let syncing = false;
+
+    function firstVisibleIndex(container) {
+      const items = container.querySelectorAll('[data-para-index]');
+      if (items.length === 0) return null;
+      const st = container.scrollTop;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].offsetTop + items[i].offsetHeight / 2 >= st - 10) {
+          return parseInt(items[i].getAttribute('data-para-index'), 10);
+        }
+      }
+      return parseInt(items[items.length - 1].getAttribute('data-para-index'), 10);
+    }
+
+    function scrollToPara(container, idx) {
+      const target = container.querySelector(`[data-para-index="${idx}"]`);
+      if (!target) return;
+      suppressSyncRef.current = true;
+      target.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      requestAnimationFrame(() => { suppressSyncRef.current = false; });
+    }
+
     const onLeft = () => {
-      if (syncing || suppressSyncRef.current) return;
-      syncing = true;
-      const pct = left.scrollTop / (left.scrollHeight - left.clientHeight);
-      right.scrollTop = pct * (right.scrollHeight - right.clientHeight);
-      syncing = false;
+      if (suppressSyncRef.current) return;
+      const idx = firstVisibleIndex(left);
+      if (idx == null) return;
+      scrollToPara(right, idx);
     };
     const onRight = () => {
-      if (syncing || suppressSyncRef.current) return;
-      syncing = true;
-      const pct = right.scrollTop / (right.scrollHeight - right.clientHeight);
-      left.scrollTop = pct * (left.scrollHeight - left.clientHeight);
-      syncing = false;
+      if (suppressSyncRef.current) return;
+      const idx = firstVisibleIndex(right);
+      if (idx == null) return;
+      scrollToPara(left, idx);
     };
+
     left.addEventListener('scroll', onLeft, { passive: true });
     right.addEventListener('scroll', onRight, { passive: true });
     return () => {
