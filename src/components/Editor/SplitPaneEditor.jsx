@@ -79,6 +79,7 @@ function PageGroup({ pageNum, paragraphs, originals, translations, translatingIn
         const text = originals[p.index] !== undefined ? originals[p.index] : p.text;
         const rows = Math.max(2, text.split('\n').length, Math.ceil(text.length / 55));
         if (!textareaRefs.current[p.index]) textareaRefs.current[p.index] = createRef();
+        const translated = translations && translations[p.index] !== undefined;
         return (
           <div key={p.id || p.index} data-para-index={p.index} className="mb-2 ml-2">
             <div className="flex items-center gap-2 mb-0.5">
@@ -92,12 +93,13 @@ function PageGroup({ pageNum, paragraphs, originals, translations, translatingIn
               />
               <span className="text-[11px] text-gray-400 font-mono">¶{p.index + 1}</span>
               <span className="text-[11px] text-gray-400">p.{pageNum}</span>
+              {translated && <span className="text-[10px] text-amber-600 font-medium">✓ Translated</span>}
             </div>
             <SmartTextarea
               ref={textareaRefs.current[p.index]}
               value={text}
               onChange={(newText) => onTextChange(p.index, newText)}
-              className="w-full p-3 bg-white rounded border border-gray-200 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 text-sm resize-y min-h-[3.5rem] font-sans leading-relaxed whitespace-pre-wrap"
+              className={`w-full p-3 border text-sm resize-y min-h-[3.5rem] font-sans leading-relaxed whitespace-pre-wrap rounded ${translated ? 'bg-amber-50 border-amber-300' : 'bg-white border-gray-200'} focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400`}
               rows={rows}
             />
             <div className="mt-1 flex gap-1">
