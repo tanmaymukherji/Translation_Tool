@@ -15,7 +15,6 @@ function parseParagraphs(project) {
   let index = 0;
 
   if (paraElements.length > 0 || tableElements.length > 0) {
-    // Merge all elements in document order
     const allEls = Array.from(div.body?.childNodes || div.childNodes).filter(
       n => n.nodeType === 1 && (n.tagName === 'P' || n.tagName === 'TABLE')
     );
@@ -134,7 +133,7 @@ function TableGroup({ rows, onCellChange, readOnly, className }) {
   );
 }
 
-function PageGroup({ pageNum, paragraphs, originals, translations, translatingIndex, onTextChange, onTranslate, onKeepOriginal, imageData, linesByIndex }) {
+function PageGroup({ pageNum, paragraphs, originals, translations, translatingIndex, onTextChange, onTranslate, onKeepOriginal, projectId, linesByIndex }) {
   const textareaRefs = useRef({});
   const filename = paragraphs[0]?.filename || '';
   return (
@@ -164,7 +163,8 @@ function PageGroup({ pageNum, paragraphs, originals, translations, translatingIn
               {!isTable && <SuggestionButton textareaRef={textareaRefs.current[p.index]} />}
               {!isTable && <ReScanButton
                 textareaRef={textareaRefs.current[p.index]}
-                imageData={imageData}
+                projectId={projectId}
+                pageNumber={pageNum}
                 lines={linesByIndex[p.index]}
                 paraIndex={idx}
                 totalParas={paragraphs.length}
@@ -218,7 +218,7 @@ function PageGroup({ pageNum, paragraphs, originals, translations, translatingIn
   );
 }
 
-function TranslationPageGroup({ pageNum, paragraphs, translations, onTextChange, imageData, linesByIndex }) {
+function TranslationPageGroup({ pageNum, paragraphs, translations, onTextChange, projectId, linesByIndex }) {
   const textareaRefs = useRef({});
   const paraList = Array.isArray(paragraphs) ? paragraphs : [];
   const hasAny = paraList.some((p) => translations && translations[p.index] !== undefined);
@@ -250,7 +250,8 @@ function TranslationPageGroup({ pageNum, paragraphs, translations, onTextChange,
               {!isTable && <SuggestionButton textareaRef={textareaRefs.current[p.index]} />}
               {!isTable && <ReScanButton
                 textareaRef={textareaRefs.current[p.index]}
-                imageData={imageData}
+                projectId={projectId}
+                pageNumber={pageNum}
                 lines={linesByIndex[p.index]}
                 paraIndex={idx}
                 totalParas={paraList.length}
@@ -296,15 +297,6 @@ export default function SplitPaneEditor({ project, images, paragraphs: origParag
   const leftScrollRef = useRef(null);
   const rightScrollRef = useRef(null);
   const suppressSyncRef = useRef(false);
-
-  // Lookup maps for the re-scan feature
-  const imageByPage = useMemo(() => {
-    const map = {};
-    for (const img of (images || [])) {
-      map[img.page] = img.data;
-    }
-    return map;
-  }, [images]);
 
   const linesByIndex = useMemo(() => {
     const map = {};
@@ -538,7 +530,7 @@ export default function SplitPaneEditor({ project, images, paragraphs: origParag
               onTextChange={updateOriginal}
               onTranslate={handleTranslate}
               onKeepOriginal={handleKeepOriginal}
-              imageData={imageByPage[page]}
+              projectId={project?.id}
               linesByIndex={linesByIndex}
             />
           ))}
@@ -615,7 +607,7 @@ export default function SplitPaneEditor({ project, images, paragraphs: origParag
                 paragraphs={pageParas}
                 translations={translations}
                 onTextChange={updateTranslation}
-                imageData={imageByPage[page]}
+                projectId={project?.id}
                 linesByIndex={linesByIndex}
               />
             ))

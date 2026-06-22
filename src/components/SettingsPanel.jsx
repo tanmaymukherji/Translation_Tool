@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import CONFIG from '../config';
-import { listProjects, saveProject } from '../storage';
+import { listProjects, saveProject, getWorkingInfo, changeWorkingDirectory } from '../storage';
 
 export default function SettingsPanel({ onClose }) {
   const [hfKey, setHfKey] = useState(
@@ -17,16 +17,28 @@ export default function SettingsPanel({ onClose }) {
   const [importStatus, setImportStatus] = useState('');
   const fileInputRef = useRef(null);
   const [exporting, setExporting] = useState(false);
+  const [changingDir, setChangingDir] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const projects = await listProjects();
-        const totalSize = new Blob([JSON.stringify(projects)]).size;
-        setStorageInfo({ count: projects.length, size: totalSize });
-      } catch { setStorageInfo({ count: 0, size: 0 }) }
+        const info = await getWorkingInfo();
+        setStorageInfo(info);
+      } catch { setStorageInfo({ name: 'Unknown', count: 0 }) }
     })();
   }, []);
+
+  const handleChangeDirectory = async () => {
+    setChangingDir(true);
+    try {
+      const info = await changeWorkingDirectory();
+      setStorageInfo(info);
+    } catch (err) {
+      if (err.name !== 'AbortError') alert('Failed to change directory: ' + err.message);
+    } finally {
+      setChangingDir(false);
+    }
+  };
 
   const handleExport = async () => {
     setExporting(true);
@@ -56,7 +68,7 @@ export default function SettingsPanel({ onClose }) {
       if (!Array.isArray(projects)) throw new Error('Invalid backup file');
       let imported = 0;
       for (const p of projects) {
-        if (p.id && p.content) {
+        if (p.id && (p.paragraphsArray || p.content)) {
           await saveProject(p);
           imported++;
         }
@@ -67,12 +79,6 @@ export default function SettingsPanel({ onClose }) {
     }
     e.target.value = '';
   };
-
-  function formatSize(bytes) {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / 1048576).toFixed(1) + ' MB';
-  }
 
   const handleSave = () => {
     localStorage.setItem('hf_api_key', hfKey);
@@ -147,14 +153,35 @@ export default function SettingsPanel({ onClose }) {
           <h3 className="text-sm font-semibold text-gray-700 mb-2">Storage</h3>
           <div className="bg-gray-50 rounded p-3 text-xs text-gray-600 space-y-2">
             <p>
-              Documents are saved in your browser's <strong>IndexedDB</strong> database.
-              Data stays on your device and is not uploaded anywhere.
+              All project data is stored in your selected working directory on your file system.
+              Images are saved to disk and loaded on demand, keeping browser memory usage low.
             </p>
             {storageInfo && (
-              <p>
-                <strong>{storageInfo.count}</strong> document(s) &middot; ~{formatSize(storageInfo.size)} used
-              </p>
+              <div className="space-y-1">
+                <p><strong>Working directory:</strong> {storageInfo.name}</p>
+                <p><strong>Local projects:</strong> {storageInfo.count}</p>
+              </div>
             )}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleChangeDirectory}
+                disabled={changingDir}
+                className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-xs disabled:opacity-50"
+              >
+                {changingDir ? 'Selecting...' : 'Change Working Directory'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <hr className="my-4" />
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 mb-2">Backup & Restore</h3>
+          <div className="bg-gray-50 rounded p-3 text-xs text-gray-600 space-y-2">
+            <p>
+              Export or import project metadata as a JSON file.
+              Images and project files on disk are not included.
+            </p>
             <div className="flex gap-2 pt-1">
               <button
                 onClick={handleExport}

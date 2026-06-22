@@ -1,134 +1,219 @@
-// Client-side document storage using native IndexedDB
+const CONFIG_DB_NAME = 'T3Config';
+const CONFIG_DB_VERSION = 1;
+const CONFIG_STORE = 'config';
+const LEGACY_DB_NAME = 'TranslationTool';
 
-const DB_NAME = 'TranslationTool';
-const DB_VERSION = 2;
+let _baseDirHandle = null;
+let _projectsDirHandle = null;
 
-function openDB() {
+function _openConfigDB() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = indexedDB.open(CONFIG_DB_NAME, CONFIG_DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (db.objectStoreNames.contains('projects')) {
-        db.deleteObjectStore('projects');
+      if (!db.objectStoreNames.contains(CONFIG_STORE)) {
+        db.createObjectStore(CONFIG_STORE);
       }
-      const store = db.createObjectStore('projects', { keyPath: 'id' });
-      store.createIndex('folder_path', 'folder_path', { unique: false });
-      store.createIndex('name', 'name', { unique: false });
-      store.createIndex('created_at', 'created_at', { unique: false });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
 
-let dbPromise = null;
-
-function getDB() {
-  if (!dbPromise) dbPromise = openDB();
-  return dbPromise;
+async function _storeHandle(handle) {
+  const db = await _openConfigDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(CONFIG_STORE, 'readwrite');
+    tx.objectStore(CONFIG_STORE).put(handle, 'workDirHandle');
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
-function isValidKey(value) {
-  if (value === null || value === undefined) return false;
-  const t = typeof value;
-  if (t === 'number') return isFinite(value);
-  if (t === 'string') return true;
-  return false;
+async function _retrieveHandle() {
+  try {
+    const db = await _openConfigDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(CONFIG_STORE, 'readonly');
+      const request = tx.objectStore(CONFIG_STORE).get('workDirHandle');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function _getBaseDir() {
+  if (_baseDirHandle) return _baseDirHandle;
+
+  _baseDirHandle = await _retrieveHandle();
+
+  if (_baseDirHandle) {
+    try {
+      const perm = await _baseDirHandle.queryPermission({ mode: 'readwrite' });
+      if (perm !== 'granted') {
+        const result = await _baseDirHandle.requestPermission({ mode: 'readwrite' });
+        if (result !== 'granted') _baseDirHandle = null;
+      }
+    } catch {
+      _baseDirHandle = null;
+    }
+  }
+
+  if (!_baseDirHandle) {
+    _baseDirHandle = await window.showDirectoryPicker({
+      id: 't3-work-dir',
+      startIn: 'documents',
+      mode: 'readwrite',
+    });
+    await _storeHandle(_baseDirHandle);
+  }
+
+  return _baseDirHandle;
+}
+
+async function _getProjectsDir() {
+  if (_projectsDirHandle) return _projectsDirHandle;
+  const base = await _getBaseDir();
+  _projectsDirHandle = await base.getDirectoryHandle('projects', { create: true });
+  return _projectsDirHandle;
+}
+
+async function _getProjectDir(projectId) {
+  const projectsDir = await _getProjectsDir();
+  return projectsDir.getDirectoryHandle(projectId, { create: true });
+}
+
+export function buildHtmlContent(paragraphs) {
+  return paragraphs.map((p) => {
+    if (p.type === 'table' && p.rows && p.rows.length > 0) {
+      const rowsHtml = p.rows.map(r =>
+        '<tr>' + r.map(c => '<td>' + (c || '') + '</td>').join('') + '</tr>'
+      ).join('');
+      return `<table data-page="${p.page}" data-filename="${p.filename || ''}" data-type="table">${rowsHtml}</table>`;
+    }
+    return `<p data-page="${p.page}" data-filename="${p.filename || ''}"${p.source ? ` data-source="${p.source}"` : ''}>${p.text}</p>`;
+  }).join('\n');
+}
+
+export async function initializeStorage() {
+  try {
+    _baseDirHandle = await _getBaseDir();
+    _projectsDirHandle = await _getProjectsDir();
+    await clearOldData();
+    return { name: _baseDirHandle.name };
+  } catch (err) {
+    if (err.name === 'AbortError') throw err;
+    console.error('Storage initialization failed:', err);
+    throw new Error('Storage permission denied. Please allow access to use this application.');
+  }
 }
 
 export async function listProjects() {
-  const db = await getDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction('projects', 'readonly');
-    const store = tx.objectStore('projects');
-    const request = store.getAll();
-    request.onsuccess = () => {
-      const projects = request.result || [];
-      projects.sort((a, b) => {
-        const da = a.last_opened || a.created_at || 0;
-        const db2 = b.last_opened || b.created_at || 0;
-        return db2 - da;
-      });
-      resolve(projects);
-    };
-    request.onerror = () => reject(request.error);
-  });
-}
-
-export async function getProject(id) {
-  const db = await getDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction('projects', 'readonly');
-    const store = tx.objectStore('projects');
-    const request = store.get(id);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-export async function saveProject(project) {
-  const db = await getDB();
-
-  if (!project || typeof project !== 'object') {
-    throw new Error('saveProject: project must be an object, got ' + typeof project);
-  }
-
-  const now = Date.now();
-  const keys = Object.keys(project);
-
-  // Log what we received
-  console.log('[saveProject] keys:', keys.join(','));
-  console.log('[saveProject] id:', project.id, 'type:', typeof project.id);
-
-  // Generate a string ID for new records, reuse existing if valid
-  let finalId;
-  if (project.id != null && isValidKey(project.id)) {
-    finalId = project.id;
-  } else {
-    finalId = 'p_' + now + '_' + Math.random().toString(36).slice(2, 8);
-  }
-
-  console.log('[saveProject] finalId:', finalId, 'type:', typeof finalId);
-
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction('projects', 'readwrite');
-    const store = tx.objectStore('projects');
-
-    // Build clean object with no undefined values
-    const toStore = {};
-    for (const k of keys) {
-      const v = project[k];
-      if (v !== undefined && k !== 'id') {
-        toStore[k] = v;
+  const projectsDir = await _getProjectsDir();
+  const projects = [];
+  for await (const [name, handle] of projectsDir.entries()) {
+    if (handle.kind === 'directory') {
+      try {
+        const fileHandle = await handle.getFileHandle('project.json');
+        const file = await fileHandle.getFile();
+        const content = await file.text();
+        projects.push(JSON.parse(content));
+      } catch {
+        // Skip invalid project dirs silently
       }
     }
-    toStore.id = finalId;
-    toStore.last_opened = now;
-    if (!('created_at' in toStore)) {
-      toStore.created_at = now;
+  }
+  projects.sort((a, b) => (b.last_opened || 0) - (a.last_opened || 0));
+  return projects;
+}
+
+export async function getProject(projectId) {
+  const projectDir = await _getProjectDir(projectId);
+  const fileHandle = await projectDir.getFileHandle('project.json');
+  const file = await fileHandle.getFile();
+  const content = await file.text();
+  return JSON.parse(content);
+}
+
+export async function saveProject(projectData) {
+  const now = Date.now();
+  const finalId = projectData.id || 'p_' + now + '_' + Math.random().toString(36).slice(2, 8);
+
+  const toStore = { ...projectData, id: finalId, last_opened: now };
+  if (!('created_at' in toStore)) {
+    toStore.created_at = now;
+  }
+
+  const projectDir = await _getProjectDir(finalId);
+  const fileHandle = await projectDir.getFileHandle('project.json', { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(JSON.stringify(toStore, null, 2));
+  await writable.close();
+
+  return toStore;
+}
+
+export async function deleteProject(projectId) {
+  const projectsDir = await _getProjectsDir();
+  await projectsDir.removeEntry(projectId, { recursive: true });
+}
+
+export async function writeImage(projectId, pageNumber, blob) {
+  const projectDir = await _getProjectDir(projectId);
+  const imagesDir = await projectDir.getDirectoryHandle('images', { create: true });
+  const fileHandle = await imagesDir.getFileHandle(`page_${pageNumber}.png`, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+}
+
+export async function readImage(projectId, pageNumber) {
+  try {
+    const projectDir = await _getProjectDir(projectId);
+    const imagesDir = await projectDir.getDirectoryHandle('images');
+    const fileHandle = await imagesDir.getFileHandle(`page_${pageNumber}.png`);
+    return await fileHandle.getFile();
+  } catch {
+    return null;
+  }
+}
+
+export async function clearOldData() {
+  try {
+    const request = indexedDB.deleteDatabase(LEGACY_DB_NAME);
+    await new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  } catch {
+    // Non-critical cleanup
+  }
+}
+
+export async function changeWorkingDirectory() {
+  const newHandle = await window.showDirectoryPicker({
+    id: 't3-work-dir',
+    startIn: 'documents',
+    mode: 'readwrite',
+  });
+  await _storeHandle(newHandle);
+  _baseDirHandle = newHandle;
+  _projectsDirHandle = null;
+  return { name: newHandle.name };
+}
+
+export async function getWorkingInfo() {
+  try {
+    const baseDir = await _getBaseDir();
+    const projectsDir = await _getProjectsDir();
+    let count = 0;
+    for await (const entry of projectsDir.entries()) {
+      if (entry[1].kind === 'directory') count++;
     }
-
-    const request = store.put(toStore);
-    request.onsuccess = () => resolve(toStore);
-    request.onerror = () => {
-      const err = request.error;
-      console.error('[saveProject] FAILED:', err ? err.message : 'unknown', 'id:', finalId);
-      reject(err || new Error('IndexedDB put failed'));
-    };
-  });
-}
-
-export async function deleteProject(id) {
-  const db = await getDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction('projects', 'readwrite');
-    const store = tx.objectStore('projects');
-    const request = store.delete(id);
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
-}
-
-export async function createProject(name, folderPath, content, paragraphs) {
-  return saveProject({ name, folder_path: folderPath, content, paragraphs });
+    return { name: baseDir.name, count };
+  } catch {
+    return { name: 'Unknown', count: 0 };
+  }
 }

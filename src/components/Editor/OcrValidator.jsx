@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import SmartTextarea from './SmartTextarea';
 import SuggestionButton, { ReScanButton } from './SuggestionButton';
+import { readImage } from '../../storage';
 
 function ZoomableImage({ src, alt, focusBox }) {
   const containerRef = useRef(null);
@@ -13,7 +14,6 @@ function ZoomableImage({ src, alt, focusBox }) {
   const [dragPanStart, setDragPanStart] = useState({ x: 0, y: 0 });
   const [loaded, setLoaded] = useState(false);
 
-  // Handle cached image: src may already be loaded before React attaches onLoad
   useEffect(() => {
     const img = imgRef.current;
     if (img && img.complete && img.naturalWidth) {
@@ -22,7 +22,6 @@ function ZoomableImage({ src, alt, focusBox }) {
     }
   }, []);
 
-  // Track container size with proper fallback
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -40,7 +39,6 @@ function ZoomableImage({ src, alt, focusBox }) {
     return () => ro.disconnect();
   }, []);
 
-  // When image loads (non-cached path), get natural size
   const onImgLoad = useCallback(() => {
     const img = imgRef.current;
     if (!img) return;
@@ -50,7 +48,6 @@ function ZoomableImage({ src, alt, focusBox }) {
     }
   }, []);
 
-  // Recalculate fit zoom when container or image dimensions change
   const fitZoom = dims.cw > 0 && dims.iw > 0
     ? Math.min(dims.cw / dims.iw, dims.ch / dims.ih, 1)
     : 1;
@@ -67,7 +64,6 @@ function ZoomableImage({ src, alt, focusBox }) {
     };
   }, [dims, zoom]);
 
-  // Non-passive wheel listener to allow preventDefault
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -92,7 +88,6 @@ function ZoomableImage({ src, alt, focusBox }) {
     return () => el.removeEventListener('wheel', handler);
   }, [zoom, pan, dims, fitZoom, clampPan]);
 
-  // Reset to fit-to-screen when image loads or container resizes
   useEffect(() => {
     if (loaded) {
       setZoom(fitZoom);
@@ -100,7 +95,6 @@ function ZoomableImage({ src, alt, focusBox }) {
     }
   }, [loaded, dims.cw, dims.ch, dims.iw, dims.ih]);
 
-  // Focus on a specific image region when focusBox changes
   useEffect(() => {
     if (!loaded || !focusBox || dims.cw <= 0 || dims.iw <= 0) return;
 
@@ -204,8 +198,9 @@ function ZoomableImage({ src, alt, focusBox }) {
   );
 }
 
-export default function OcrValidator({ images, paragraphs, onSaveParagraphs }) {
+export default function OcrValidator({ projectId, images, paragraphs, onSaveParagraphs }) {
   console.log('[OcrValidator] RENDER', {
+    projectId,
     paragraphsCount: paragraphs?.length,
     paragraphsSample: paragraphs?.slice(0, 2).map(p => ({ i: p.index, t: p.text?.substring(0, 30) })),
   });
@@ -214,7 +209,42 @@ export default function OcrValidator({ images, paragraphs, onSaveParagraphs }) {
   const [currentPage, setCurrentPage] = useState(pages.length > 0 ? pages[0] : 1);
   const [edited, setEdited] = useState({});
   const [focusBbox, setFocusBbox] = useState(null);
+  const [imageUrl, setImageUrl] = useState(null);
   const textareaRefs = useRef({});
+  const imageUrlRef = useRef(null);
+
+  // Load image when page changes
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // Revoke previous URL
+      if (imageUrlRef.current) {
+        URL.revokeObjectURL(imageUrlRef.current);
+        imageUrlRef.current = null;
+      }
+      setImageUrl(null);
+
+      if (!projectId || !currentPage) return;
+      const file = await readImage(projectId, currentPage);
+      if (cancelled) return;
+      if (file) {
+        const url = URL.createObjectURL(file);
+        imageUrlRef.current = url;
+        setImageUrl(url);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectId, currentPage]);
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      if (imageUrlRef.current) {
+        URL.revokeObjectURL(imageUrlRef.current);
+        imageUrlRef.current = null;
+      }
+    };
+  }, []);
 
   // Reset to first page if pages change
   useEffect(() => {
@@ -313,11 +343,11 @@ export default function OcrValidator({ images, paragraphs, onSaveParagraphs }) {
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Image */}
         <div className="w-1/2 border-r border-gray-300">
-          {pageImage ? (
-            <ZoomableImage src={pageImage.data} alt={`Page ${currentPage}`} focusBox={focusBbox} />
+          {imageUrl ? (
+            <ZoomableImage src={imageUrl} alt={`Page ${currentPage}`} focusBox={focusBbox} />
           ) : (
             <div className="h-full flex items-center justify-center text-gray-400 text-sm bg-gray-800">
-              No image available
+              {projectId ? 'Loading image...' : 'No image available'}
             </div>
           )}
         </div>
@@ -341,7 +371,7 @@ export default function OcrValidator({ images, paragraphs, onSaveParagraphs }) {
                     {!isTable && <SuggestionButton textareaRef={textareaRefs.current[p.index]} />}
                     {!isTable && <ReScanButton
                       textareaRef={textareaRefs.current[p.index]}
-                      imageData={pageImage?.data}
+                      imageData={imageUrl}
                       lines={p.lines}
                       onFocusImage={setFocusBbox}
                       paraIndex={idx}

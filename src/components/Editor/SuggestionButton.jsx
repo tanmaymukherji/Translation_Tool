@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { fetchSuggestions, reOcrRegion } from '../../spellcheck';
+import { readImage } from '../../storage';
 
 function findLineBbox(lines, selStart, selEnd) {
   let offset = 0;
@@ -15,7 +16,7 @@ function findLineBbox(lines, selStart, selEnd) {
   return null;
 }
 
-export function ReScanButton({ textareaRef, imageData, lines, onFocusImage, paraIndex, totalParas, disabled }) {
+export function ReScanButton({ textareaRef, imageData, lines, onFocusImage, paraIndex, totalParas, disabled, projectId, pageNumber }) {
   const btnRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [result, setResult] = useState('');
@@ -37,7 +38,7 @@ export function ReScanButton({ textareaRef, imageData, lines, onFocusImage, para
     return { x0: 0, y0: idx * ph, x1: img.naturalWidth, y1: (idx + 1) * ph };
   }
 
-  const handleClick = useCallback(() => {
+  const handleClick = useCallback(async () => {
     if (disabled) return;
     const ta = textareaRef?.current;
     if (!ta) return;
@@ -57,7 +58,24 @@ export function ReScanButton({ textareaRef, imageData, lines, onFocusImage, para
     setResult('');
     setLoading(false);
 
-    if (!imageData) { setResult('No image available for this page.'); return; }
+    // Resolve image data: use provided imageData, or load from storage if project/page given
+    let imgData = imageData;
+    if (!imgData && projectId && pageNumber != null) {
+      setLoading(true);
+      try {
+        const file = await readImage(projectId, pageNumber);
+        if (file) {
+          imgData = URL.createObjectURL(file);
+        }
+      } catch (err) {
+        setResult('Error loading image: ' + (err?.message || ''));
+        setLoading(false);
+        return;
+      }
+      setLoading(false);
+    }
+
+    if (!imgData) { setResult('No image available for this page.'); return; }
 
     // If Tesseract provided line bbox, use it for precise crop
     if (lines && lines.length > 0 && sel !== sele) {
@@ -65,13 +83,13 @@ export function ReScanButton({ textareaRef, imageData, lines, onFocusImage, para
       if (found && found.bbox && typeof found.bbox.x0 === 'number') {
         if (onFocusImage) onFocusImage(found.bbox);
         setLoading(true);
-        reOcrRegion(imageData, found.bbox).then((txt) => {
+        try {
+          const txt = await reOcrRegion(imgData, found.bbox);
           setResult(txt || '(empty result)');
-          setLoading(false);
-        }).catch((err) => {
+        } catch (err) {
           setResult('Error: ' + (err?.message || err || 'OCR.space API failed'));
-          setLoading(false);
-        });
+        }
+        setLoading(false);
         return;
       }
     }
@@ -79,28 +97,28 @@ export function ReScanButton({ textareaRef, imageData, lines, onFocusImage, para
     // Fallback: estimate bbox from paragraph position on the page
     if (paraIndex != null && totalParas != null && totalParas > 0) {
       const img = new window.Image();
-      img.onload = () => {
+      img.onload = async () => {
         const bbox = estimateParaBbox(img, paraIndex, totalParas);
         if (onFocusImage) onFocusImage(bbox);
         setLoading(true);
-        reOcrRegion(imageData, bbox).then((txt) => {
+        try {
+          const txt = await reOcrRegion(imgData, bbox);
           setResult(txt || '(empty result)');
-          setLoading(false);
-        }).catch((err) => {
+        } catch (err) {
           setResult('Error: ' + (err?.message || err || 'OCR.space API failed'));
-          setLoading(false);
-        });
+        }
+        setLoading(false);
       };
       img.onerror = () => {
         setResult('Could not load image for region estimate.');
         setLoading(false);
       };
-      img.src = imageData;
+      img.src = imgData;
     } else {
       setResult('Cannot determine image region. Select a few words within a paragraph and try again.');
       setLoading(false);
     }
-  }, [textareaRef, imageData, lines, onFocusImage, paraIndex, totalParas, disabled]);
+  }, [textareaRef, imageData, lines, onFocusImage, paraIndex, totalParas, disabled, projectId, pageNumber]);
 
   return (
     <>

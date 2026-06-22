@@ -1,13 +1,20 @@
 import React, { useState, useRef } from 'react';
 import { ocrMultipleImages, terminateWorker } from '../../ocr';
-import { initPdfJs, detectTextPdf, extractTextParagraphs, renderPageToDataUrl, renderPageToFile } from '../../pdf-utils';
+import { initPdfJs, detectTextPdf, extractTextParagraphs, renderPageToFile } from '../../pdf-utils';
+import { saveProject, writeImage, buildHtmlContent } from '../../storage';
+
+function yieldToBrowser() {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
 
 export default function FolderImporter({ onImport, disabled }) {
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState('');
   const fileInputRef = useRef(null);
 
   const processFiles = async (files, folderName) => {
     setBusy(true);
+    setProgress('Scanning files...');
     try {
       const items = Array.from(files);
       const imageFiles = items.filter((f) => /\.(png|jpe?g|tiff?)$/i.test(f.name));
@@ -16,53 +23,73 @@ export default function FolderImporter({ onImport, disabled }) {
       if (imageFiles.length === 0 && pdfFiles.length === 0) {
         alert('No PNG, JPG, TIFF, or PDF files found.');
         setBusy(false);
+        setProgress('');
         return;
       }
 
       await initPdfJs();
 
+      const projectId = 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      const name = folderName || `Document_${new Date().toLocaleDateString().replace(/\//g, '-')}`;
+
       // Process image files (existing OCR pipeline)
+      setProgress('Running OCR on images...');
       const imageOcrResults = imageFiles.length > 0 ? await ocrMultipleImages(imageFiles, () => {}) : [];
 
-      // Process PDF files
+      // Process PDF files page by page, yielding between each
       const pdfResults = [];
       for (const pdfFile of pdfFiles) {
+        setProgress(`Loading PDF: ${pdfFile.name}...`);
+        await yieldToBrowser();
+
         const buf = await pdfFile.arrayBuffer();
         const pdfDoc = await pdfjsDocLoad(buf);
         const isText = await detectTextPdf(pdfDoc);
+
         if (isText) {
           const paragraphs = await extractTextParagraphs(pdfDoc);
-          // Render low-res preview image for each page
           const pageImages = [];
+
           for (let i = 1; i <= pdfDoc.numPages; i++) {
+            setProgress(`Rendering page ${i}/${pdfDoc.numPages}: ${pdfFile.name}...`);
+            await yieldToBrowser();
             const page = await pdfDoc.getPage(i);
-            const dataUrl = await renderPageToDataUrl(page, 1.5);
-            pageImages.push({ page: i, filename: `${pdfFile.name}_p${i}`, data: dataUrl });
+            const file = await renderPageToFile(page, 1.5, `${pdfFile.name}_p${i}.png`);
+            await writeImage(projectId, i, file);
+            pageImages.push({ page: i, filename: `page_${i}.png` });
             page.cleanup();
+            await yieldToBrowser();
           }
+
           pdfResults.push({ filename: pdfFile.name, type: 'text', paragraphs, images: pageImages, pages: pdfDoc.numPages });
+          pdfDoc.loadingTask.destroy();
         } else {
-          // Scanned PDF: render high-res, OCR
           const rendered = [];
           for (let i = 1; i <= pdfDoc.numPages; i++) {
+            setProgress(`Rendering page ${i}/${pdfDoc.numPages} for OCR: ${pdfFile.name}...`);
+            await yieldToBrowser();
             const page = await pdfDoc.getPage(i);
             const file = await renderPageToFile(page, 3.0, `${pdfFile.name}_p${i}.png`);
             rendered.push(file);
             page.cleanup();
+            await yieldToBrowser();
           }
+
+          pdfDoc.loadingTask.destroy();
+
+          setProgress(`Running OCR on scanned PDF: ${pdfFile.name}...`);
+          await yieldToBrowser();
           const ocr = rendered.length > 0 ? await ocrMultipleImages(rendered, () => {}) : [];
+
           const pageImages = [];
           for (let i = 0; i < rendered.length; i++) {
-            const dataUrl = await new Promise((resolve) => {
-              const reader = new FileReader();
-              reader.onload = () => resolve(reader.result);
-              reader.readAsDataURL(rendered[i]);
-            });
-            pageImages.push({ page: i + 1, filename: `${pdfFile.name}_p${i + 1}`, data: dataUrl });
+            await writeImage(projectId, i + 1, rendered[i]);
+            pageImages.push({ page: i + 1, filename: `page_${i + 1}.png` });
+            await yieldToBrowser();
           }
+
           pdfResults.push({ filename: pdfFile.name, type: 'scanned', ocrResults: ocr, images: pageImages, pages: pdfDoc.numPages });
         }
-        pdfDoc.loadingTask.destroy();
       }
 
       // Build merged arrays preserving original file order
@@ -71,18 +98,16 @@ export default function FolderImporter({ onImport, disabled }) {
       let paragraphIndex = 0;
 
       for (const file of items) {
+        await yieldToBrowser();
+
         if (/\.(png|jpe?g|tiff?)$/i.test(file.name)) {
           const idx = imageFiles.indexOf(file);
           const r = imageOcrResults[idx] || {};
           if (r.error) console.warn(`OCR error for ${r.filename}: ${r.error}`);
 
-          const dataUrl = await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.readAsDataURL(file);
-          });
-
-          allImages.push({ page: r.page || idx + 1, filename: file.name, data: dataUrl });
+          const pageNum = r.page || idx + 1;
+          await writeImage(projectId, pageNum, file);
+          allImages.push({ page: pageNum, filename: `page_${pageNum}.png` });
 
           for (const para of (r.paragraphs || [])) {
             const text = (typeof para === 'string' ? para : (para.text || '')).trim();
@@ -90,7 +115,7 @@ export default function FolderImporter({ onImport, disabled }) {
               allParagraphs.push({
                 id: `para_${paragraphIndex}`,
                 index: paragraphIndex,
-                page: r.page || idx + 1,
+                page: pageNum,
                 filename: file.name,
                 text,
                 lines: typeof para === 'object' && Array.isArray(para.lines) ? para.lines : undefined,
@@ -103,9 +128,9 @@ export default function FolderImporter({ onImport, disabled }) {
           if (!pr) continue;
 
           if (pr.type === 'text') {
-            let pageOffset = allImages.length;
+            const pageOffset = allImages.length;
             for (const img of pr.images) {
-              allImages.push({ page: pageOffset + img.page, filename: img.filename, data: img.data });
+              allImages.push({ page: pageOffset + img.page, filename: img.filename });
             }
             for (const para of pr.paragraphs) {
               const entry = {
@@ -125,9 +150,9 @@ export default function FolderImporter({ onImport, disabled }) {
               paragraphIndex++;
             }
           } else {
-            let pageOffset = allImages.length;
+            const pageOffset = allImages.length;
             for (const img of pr.images) {
-              allImages.push({ page: pageOffset + (img.page || allImages.length + 1), filename: img.filename, data: img.data });
+              allImages.push({ page: pageOffset + (img.page || allImages.length + 1), filename: img.filename });
             }
             for (let pi = 0; pi < (pr.ocrResults || []).length; pi++) {
               const r = pr.ocrResults[pi];
@@ -153,29 +178,38 @@ export default function FolderImporter({ onImport, disabled }) {
       if (allParagraphs.length === 0) {
         alert('No text could be extracted.');
         setBusy(false);
+        setProgress('');
         return;
       }
 
-      const name = folderName || `Document_${new Date().toLocaleDateString().replace(/\//g, '-')}`;
+      const htmlContent = buildHtmlContent(allParagraphs);
 
-      // Route decision: if ONLY text PDFs (no images, no scanned PDFs), go to translation
+      setProgress('Saving project...');
+      await yieldToBrowser();
+
       const onlyTextPdfs = imageFiles.length === 0 && pdfFiles.length > 0 && pdfFiles.every(f => {
         const pr = pdfResults.find(p => p.filename === f.name);
         return pr && pr.type === 'text';
       });
 
-      onImport({
+      const project = await saveProject({
+        id: projectId,
         name,
-        folder: folderName || 'upload',
-        paragraphs: allParagraphs,
+        folder_path: folderName || 'upload',
+        content: htmlContent,
+        paragraphsArray: allParagraphs,
+        total_paragraphs: allParagraphs.length,
         images: allImages,
-        isDocx: onlyTextPdfs ? true : undefined,
+        isDocx: !!onlyTextPdfs,
       });
+
+      onImport(project);
     } catch (err) {
       console.error('Import failed:', err);
       alert('Import failed: ' + err.message);
     } finally {
       setBusy(false);
+      setProgress('');
     }
   };
 
@@ -232,7 +266,7 @@ export default function FolderImporter({ onImport, disabled }) {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
-            OCR Processing...
+            <span className="text-xs max-w-[200px] truncate">{progress || 'Processing...'}</span>
           </>
         ) : (
           '+ Select Folder / Images'

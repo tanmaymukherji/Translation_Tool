@@ -6,7 +6,7 @@ import FolderImporter from './components/Importer/FolderImporter';
 import DocxImporter from './components/Importer/DocxImporter';
 import SettingsPanel from './components/SettingsPanel';
 import ErrorBanner from './components/ErrorBanner';
-import { listProjects, saveProject, deleteProject } from './storage';
+import { initializeStorage, listProjects, saveProject, deleteProject } from './storage';
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -45,6 +45,8 @@ class ErrorBoundary extends Component {
 }
 
 export default function App() {
+  const [appReady, setAppReady] = useState(false);
+  const [appError, setAppError] = useState(null);
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -54,7 +56,19 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
-    loadProjects();
+    (async () => {
+      try {
+        await initializeStorage();
+        await loadProjects();
+        setAppReady(true);
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          setAppError('Folder selection was cancelled. Reload the page and allow access to the working directory to use this application.');
+        } else {
+          setAppError(err.message || 'Failed to initialize storage');
+        }
+      }
+    })();
   }, []);
 
   const loadProjects = async () => {
@@ -193,6 +207,34 @@ export default function App() {
     }
   };
 
+  if (appError) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-100">
+        <div className="bg-white p-8 rounded-lg shadow-xl max-w-md text-center">
+          <h2 className="text-lg font-bold text-red-700 mb-4">Storage Error</h2>
+          <p className="text-sm text-gray-600 mb-6">{appError}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+          >
+            Reload & Try Again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!appReady) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-100">
+        <div className="text-center">
+          <div className="animate-spin h-8 w-8 border-4 border-indigo-600 border-t-transparent rounded-full mx-auto mb-4" />
+          <p className="text-gray-500 text-sm">Initializing storage...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <ErrorBoundary>
     <div className="h-screen flex flex-col">
@@ -239,7 +281,6 @@ export default function App() {
         )}
         {view === 'editor' && activeProject && (
           <div className="h-full flex flex-col">
-            {/* Editor Tab Bar */}
             <div className="bg-gray-200 border-b border-gray-300 px-4 py-0 flex items-center gap-0">
               <button
                 onClick={() => setEditorTab('ocr')}
@@ -265,6 +306,7 @@ export default function App() {
 
             {editorTab === 'ocr' ? (
               <OcrValidator
+                projectId={activeProject.id}
                 images={activeProject.images || []}
                 paragraphs={activeProject.paragraphsArray || []}
                 onSaveParagraphs={handleSaveOcr}

@@ -1,13 +1,15 @@
 import React, { useState, useRef } from 'react';
 import * as mammoth from 'mammoth';
-import { initPdfJs, detectTextPdf, extractTextParagraphs, renderPageToDataUrl, renderPageToFile } from '../../pdf-utils';
+import { initPdfJs, detectTextPdf, extractTextParagraphs, renderPageToFile } from '../../pdf-utils';
 import { ocrMultipleImages } from '../../ocr';
+import { saveProject, writeImage, buildHtmlContent } from '../../storage';
 
 export default function DocxImporter({ onImport, disabled }) {
   const [busy, setBusy] = useState(false);
   const fileInputRef = useRef(null);
 
   const processDocx = async (file, handle) => {
+    const projectId = 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
     const arrayBuffer = await file.arrayBuffer();
     const result = await mammoth.convertToHtml({ arrayBuffer });
     const html = result.value;
@@ -56,17 +58,25 @@ export default function DocxImporter({ onImport, disabled }) {
     }
 
     const name = file.name.replace(/\.docx$/i, '') || 'Untitled Document';
+    const htmlContent = buildHtmlContent(allParagraphs);
 
-    onImport({
+    const project = await saveProject({
+      id: projectId,
       name,
-      folder: file.name,
-      paragraphs: allParagraphs,
+      folder_path: file.name,
+      content: htmlContent,
+      paragraphsArray: allParagraphs,
+      total_paragraphs: allParagraphs.length,
+      images: [],
       isDocx: true,
       fileHandle: handle || null,
     });
+
+    onImport(project);
   };
 
   const processPdf = async (file, handle) => {
+    const projectId = 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
     const buf = await file.arrayBuffer();
     const pdfjs = await initPdfJs();
     const doc = await pdfjs.getDocument({data: new Uint8Array(buf)}).promise;
@@ -75,7 +85,7 @@ export default function DocxImporter({ onImport, disabled }) {
     if (isText) {
       const paragraphs = await extractTextParagraphs(doc);
       const name = file.name.replace(/\.pdf$/i, '') || 'Untitled Document';
-        doc.loadingTask.destroy();
+      doc.loadingTask.destroy();
       if (paragraphs.length === 0) {
         alert('No text could be extracted from the PDF.');
         return;
@@ -96,13 +106,21 @@ export default function DocxImporter({ onImport, disabled }) {
         }
         return entry;
       });
-      onImport({
+
+      const htmlContent = buildHtmlContent(allParagraphs);
+      const project = await saveProject({
+        id: projectId,
         name,
-        folder: file.name,
-        paragraphs: allParagraphs,
+        folder_path: file.name,
+        content: htmlContent,
+        paragraphsArray: allParagraphs,
+        total_paragraphs: allParagraphs.length,
+        images: [],
         isDocx: true,
         fileHandle: handle || null,
       });
+
+      onImport(project);
     } else {
       // Scanned PDF: render high-res and OCR
       const rendered = [];
@@ -112,7 +130,7 @@ export default function DocxImporter({ onImport, disabled }) {
         rendered.push(f);
         page.cleanup();
       }
-        doc.loadingTask.destroy();
+      doc.loadingTask.destroy();
 
       if (rendered.length === 0) {
         alert('Could not render PDF pages.');
@@ -125,12 +143,8 @@ export default function DocxImporter({ onImport, disabled }) {
       const allParagraphs = [];
       let paragraphIndex = 0;
       for (let i = 0; i < rendered.length; i++) {
-        const dataUrl = await new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.readAsDataURL(rendered[i]);
-        });
-        allImages.push({ page: i + 1, filename: `${file.name}_p${i + 1}`, data: dataUrl });
+        await writeImage(projectId, i + 1, rendered[i]);
+        allImages.push({ page: i + 1, filename: `page_${i + 1}.png` });
 
         const r = ocrResults[i] || {};
         for (const para of (r.paragraphs || [])) {
@@ -150,12 +164,20 @@ export default function DocxImporter({ onImport, disabled }) {
       }
 
       const name = file.name.replace(/\.pdf$/i, '') || 'Untitled Document';
-      onImport({
+      const htmlContent = buildHtmlContent(allParagraphs);
+
+      const project = await saveProject({
+        id: projectId,
         name,
-        folder: file.name,
-        paragraphs: allParagraphs,
+        folder_path: file.name,
+        content: htmlContent,
+        paragraphsArray: allParagraphs,
+        total_paragraphs: allParagraphs.length,
         images: allImages,
+        fileHandle: handle || null,
       });
+
+      onImport(project);
     }
   };
 
