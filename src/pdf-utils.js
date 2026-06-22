@@ -17,11 +17,19 @@ export async function initPdfJs() {
 
 export async function detectTextPdf(pdfDoc) {
   try {
-    const page = await pdfDoc.getPage(1);
-    const content = await page.getTextContent();
-    const chars = content.items.reduce((s, i) => s + (i.str || '').length, 0);
-    page.cleanup();
-    return chars >= 30;
+    let totalItems = 0;
+    let totalChars = 0;
+    const pagesToCheck = Math.min(pdfDoc.numPages, 3);
+    for (let i = 1; i <= pagesToCheck; i++) {
+      const page = await pdfDoc.getPage(i);
+      const content = await page.getTextContent();
+      totalItems += content.items.length;
+      totalChars += content.items.reduce((s, i) => s + (i.str || '').length, 0);
+      page.cleanup();
+    }
+    // If too many items per page, likely hidden OCR text → treat as scanned
+    if (totalItems > 2000) return false;
+    return totalChars >= 30;
   } catch {
     return false;
   }
@@ -132,12 +140,16 @@ export async function extractTextParagraphs(pdfDoc) {
   for (let i = 1; i <= pdfDoc.numPages; i++) {
     const page = await pdfDoc.getPage(i);
     const content = await page.getTextContent();
+    // Yield to main thread if there are many items
+    if (content.items.length > 500) await new Promise(r => setTimeout(r, 0));
     const lines = groupToLines(content.items);
     for (const l of lines) l.page = i;
     allLines.push(...lines);
     page.cleanup();
   }
 
+  // Yield before heavy synchronous table detection
+  if (allLines.length > 1000) await new Promise(r => setTimeout(r, 0));
   const tableRegions = detectTableRegions(allLines);
 
   // Build result: interleave paragraph and table blocks
