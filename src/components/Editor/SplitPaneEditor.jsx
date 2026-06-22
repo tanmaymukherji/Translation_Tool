@@ -182,6 +182,7 @@ export default function SplitPaneEditor({ project, images, paragraphs: origParag
   const [scrollToIndex, setScrollToIndex] = useState(null);
   const leftScrollRef = useRef(null);
   const rightScrollRef = useRef(null);
+  const suppressSyncRef = useRef(false);
 
   // Lookup maps for the re-scan feature
   const imageByPage = useMemo(() => {
@@ -234,14 +235,14 @@ export default function SplitPaneEditor({ project, images, paragraphs: origParag
     if (!left || !right) return;
     let syncing = false;
     const onLeft = () => {
-      if (syncing) return;
+      if (syncing || suppressSyncRef.current) return;
       syncing = true;
       const pct = left.scrollTop / (left.scrollHeight - left.clientHeight);
       right.scrollTop = pct * (right.scrollHeight - right.clientHeight);
       syncing = false;
     };
     const onRight = () => {
-      if (syncing) return;
+      if (syncing || suppressSyncRef.current) return;
       syncing = true;
       const pct = right.scrollTop / (right.scrollHeight - right.clientHeight);
       left.scrollTop = pct * (left.scrollHeight - left.clientHeight);
@@ -258,9 +259,11 @@ export default function SplitPaneEditor({ project, images, paragraphs: origParag
   // Auto-scroll right panel to newly translated paragraph
   useEffect(() => {
     if (scrollToIndex == null) return;
+    suppressSyncRef.current = true;
     const el = document.querySelector(`[data-para-index="${scrollToIndex}"]`);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     setScrollToIndex(null);
+    setTimeout(() => { suppressSyncRef.current = false; }, 300);
   }, [translations, scrollToIndex]);
 
   const pages = useMemo(() => {
