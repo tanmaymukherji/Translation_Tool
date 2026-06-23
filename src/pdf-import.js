@@ -5,7 +5,7 @@ import {
   getSafeRenderScale,
   renderPageToFile,
 } from './pdf-utils';
-import { ocrImage } from './ocr';
+import { smartOcrImage, rescanDetectedPdfTables } from './smart-ocr.js';
 import { writeImage, writeSourceDocument } from './storage';
 
 function yieldToBrowser() {
@@ -40,7 +40,17 @@ export async function processPdfFile({
 
       if (textPage) {
         onProgress({ phase: 'extracting', file: file.name, current: sourcePage, total: pdfDoc.numPages });
-        const pageParagraphs = await extractPageParagraphs(page, sourcePage, content);
+        let pageParagraphs = await extractPageParagraphs(page, sourcePage, content);
+        if (pageParagraphs.some((paragraph) => paragraph.type === 'table' && paragraph.bbox)) {
+          const scale = getSafeRenderScale(page);
+          const tablePage = await renderPageToFile(page, scale, `${sourceId}_table_page_${sourcePage}.jpg`, 'jpeg');
+          pageParagraphs = await rescanDetectedPdfTables(page, pageParagraphs, tablePage, scale, (update) => onProgress({
+            ...update,
+            file: file.name,
+            current: sourcePage,
+            total: pdfDoc.numPages,
+          }));
+        }
         for (const paragraph of pageParagraphs) {
           paragraphs.push({
             ...paragraph,
@@ -62,12 +72,12 @@ export async function processPdfFile({
         let ocr = { paragraphs: [] };
         let lastReportedPercent = -5;
         try {
-          ocr = await ocrImage(rendered, (percent) => {
-            const roundedPercent = Math.round(percent * 100);
+          ocr = await smartOcrImage(rendered, (update) => {
+            const roundedPercent = Math.round((update.percent || 0) * (update.percent > 1 ? 1 : 100));
             if (roundedPercent >= lastReportedPercent + 5 || roundedPercent === 100) {
               lastReportedPercent = roundedPercent;
               onProgress({
-                phase: 'ocr',
+                phase: update.phase || 'ocr',
                 file: file.name,
                 current: sourcePage,
                 total: pdfDoc.numPages,
@@ -100,6 +110,8 @@ export async function processPdfFile({
             bbox: typeof paragraph === 'object' ? paragraph.bbox : undefined,
             cells: typeof paragraph === 'object' ? paragraph.cells : undefined,
             lines: typeof paragraph === 'object' && Array.isArray(paragraph.lines) ? paragraph.lines : undefined,
+            rotation: typeof paragraph === 'object' ? paragraph.rotation : undefined,
+            ocrProvider: ocr.provider,
             source: 'pdf_ocr',
             sourceId,
             sourcePage,

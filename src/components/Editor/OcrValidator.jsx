@@ -379,11 +379,12 @@ export default function OcrValidator({ projectId, images, sources = [], paragrap
   }, []);
 
   useEffect(() => {
-    setPageRotation(0);
+    const savedRotation = paragraphs.find((paragraph) => paragraph.page === currentPage)?.rotation || 0;
+    setPageRotation(savedRotation);
     setZoneTarget(null);
     setZoneResult(null);
     setZoneError('');
-  }, [currentPage]);
+  }, [currentPage, paragraphs]);
 
   // Reset to first page if pages change
   useEffect(() => {

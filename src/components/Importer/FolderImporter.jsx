@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
-import { ocrImage, terminateWorker } from '../../ocr';
+import { terminateWorker } from '../../ocr';
+import { smartOcrImage } from '../../smart-ocr';
 import { processPdfFile } from '../../pdf-import';
 import { saveProject, writeImage, buildHtmlContent } from '../../storage';
 
@@ -45,10 +46,16 @@ export default function FolderImporter({ onImport, disabled }) {
       // Process in source order so page numbers, source documents and images stay aligned.
       for (const file of items) {
         if (/\.(png|jpe?g|tiff?)$/i.test(file.name)) {
-          globalPage++;
-          setProgress(`Running OCR: ${file.name}...`);
+          setProgress(`High-quality OCR: ${file.name}...`);
           try {
-            const result = await ocrImage(file, () => {});
+            const result = await smartOcrImage(file, (update) => {
+              setProgress(`${update.phase === 'local-ocr' ? 'Local fallback OCR' : 'High-quality OCR'}: ${file.name}...`);
+            }, { tableMode: true });
+            if (result.ignored || !(result.paragraphs || []).length) {
+              console.log('Ignoring image without meaningful written content:', file.name);
+              continue;
+            }
+            globalPage++;
             await writeImage(projectId, globalPage, file);
             allImages.push({ page: globalPage, filename: `page_${globalPage}.png` });
 
@@ -65,6 +72,8 @@ export default function FolderImporter({ onImport, disabled }) {
                 bbox: typeof paragraph === 'object' ? paragraph.bbox : undefined,
                 cells: typeof paragraph === 'object' ? paragraph.cells : undefined,
                 lines: typeof paragraph === 'object' && Array.isArray(paragraph.lines) ? paragraph.lines : undefined,
+                rotation: typeof paragraph === 'object' ? paragraph.rotation : undefined,
+                ocrProvider: result.provider,
                 source: 'image_ocr',
               });
             }

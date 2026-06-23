@@ -2,7 +2,7 @@
 
 A fully browser-based standalone web app hosted on GitHub Pages:
 1. Select a folder of scanned images (Hindi/English/Sanskrit)
-2. Extract text via OCR (runs entirely in browser via Tesseract.js WebAssembly)
+2. Extract text using high-quality cloud OCR for scans, handwriting, boards and tables, with local OCR fallback
 3. Edit and translate paragraph-by-paragraph into 10 Indian languages
 4. Export translated DOCX files
 
@@ -13,7 +13,8 @@ Just open the URL and use it.
 https://tanmaymukherji.github.io/T3/
 
 ## Features
-- **OCR**: Browser-based OCR using Tesseract.js (Hindi, English, Sanskrit)
+- **OCR routing**: OCR.space Engine 3 is used by default for scanned pages, handwriting, boards and detected tables; Tesseract.js remains the offline fallback
+- **Photo filtering**: Images without meaningful written content are ignored automatically
 - **Editor**: Split-pane editor to review extracted text and create translations
 - **Translation**: Uses Hugging Face IndicTrans2 (primary) or Bhashini (secondary) APIs
 - **Selective Translation**: Translate specific paragraphs, keep others original

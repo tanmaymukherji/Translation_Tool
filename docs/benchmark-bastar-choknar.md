@@ -19,3 +19,12 @@ The supplied Choknar corpus was tested locally without modifying the source file
 - Page rotation controls allow sideways scans to be corrected before selecting a re-scan zone.
 
 The remaining seven native-PDF tables use merged or incomplete ruling that cannot be reconstructed reliably from vector lines alone. They remain recoverable through the explicit table-zone workflow rather than being silently flattened into prose.
+
+## Release 0.2.0 automatic OCR routing
+
+- Scanned PDF pages and imported images now use the same OCR.space Engine 3 route as manual re-scan, with table mode, orientation detection and coordinate overlay enabled.
+- A representative handwritten Hindi page returned 375 characters across 23 lines; the previous local OCR output was materially degraded.
+- A representative handwritten chart-table page returned more than 800 characters. Its coordinate overlay was reconstructed as one editable three-column table block.
+- The map/aerial photograph sample returned only incidental map labels and is rejected by the substantial-written-content filter.
+- Detected tables in native-text PDFs are automatically sent through table OCR; the existing vector table is retained if the cloud result is unavailable or structurally weaker.
+- The browser tracks daily high-quality OCR requests against the 500-request allowance and falls back to local OCR after the allowance or on service/network failure.

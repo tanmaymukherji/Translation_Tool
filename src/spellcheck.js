@@ -207,9 +207,16 @@ function detectLang(text) {
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new window.Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
+    const objectUrl = src instanceof Blob ? URL.createObjectURL(src) : null;
+    img.onload = () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      resolve(img);
+    };
+    img.onerror = (error) => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      reject(error);
+    };
+    img.src = objectUrl || src;
   });
 }
 
@@ -235,86 +242,211 @@ export function parseMarkdownTable(text) {
   };
 }
 
-export async function reOcrRegionDetailed(imageData, bbox, options = {}) {
-  const img = await loadImage(imageData);
+export function hasMeaningfulOcrText(text) {
+  const normalized = String(text || '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  if (!normalized) return false;
+  const words = normalized.split(/\s+/).filter(Boolean);
+  return words.length >= 3 || normalized.replace(/\s/g, '').length >= 12;
+}
+
+export function hasSubstantialPageText(text) {
+  const normalized = String(text || '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  if (!normalized) return false;
+  const words = normalized.split(/\s+/).filter(Boolean);
+  const compact = normalized.replace(/\s/g, '');
+  const indicCharacters = (compact.match(/[\u0900-\u0D7F]/g) || []).length;
+  return compact.length >= 80 || words.length >= 12 || indicCharacters >= 24;
+}
+
+export function cloudTextToParagraphs(text, options = {}) {
+  const normalized = String(text || '').replace(/\r/g, '').trim();
+  if (!hasMeaningfulOcrText(normalized)) return [];
+  const lines = normalized.split('\n').map((line) => line.trim()).filter(Boolean);
+  const table = options.preferTable ? parseMarkdownTable(normalized) : null;
+  const explicitRows = lines.filter((line) => line.includes('|') || line.includes('\t')).length;
+  const alignedRows = lines.filter((line) => /\S\s{2,}\S/.test(line)).length;
+  if (table && (explicitRows >= 2 || (table.rows.length >= 3 && alignedRows >= Math.ceil(lines.length * 0.6)))) {
+    return [table];
+  }
+  return normalized
+    .split(/\n\s*\n/)
+    .map((block) => block.trim())
+    .filter(hasMeaningfulOcrText)
+    .map((block) => ({ text: block, source: 'cloud_ocr' }));
+}
+
+function boxUnion(boxes) {
+  if (!boxes.length) return null;
+  return {
+    x0: Math.min(...boxes.map((box) => box.x0)),
+    y0: Math.min(...boxes.map((box) => box.y0)),
+    x1: Math.max(...boxes.map((box) => box.x1)),
+    y1: Math.max(...boxes.map((box) => box.y1)),
+  };
+}
+
+export function overlayLinesToTable(lines = []) {
+  const entries = lines.flatMap((line) => {
+    const words = (line.Words || []).map((word) => ({
+      text: String(word.WordText || '').trim(),
+      bbox: {
+        x0: Number(word.Left || 0),
+        y0: Number(word.Top || 0),
+        x1: Number(word.Left || 0) + Number(word.Width || 0),
+        y1: Number(word.Top || 0) + Number(word.Height || 0),
+      },
+    })).filter((word) => word.text && word.bbox.x1 > word.bbox.x0 && word.bbox.y1 > word.bbox.y0);
+    if (!words.length) return [];
+    return [{ text: words.map((word) => word.text).join(' '), bbox: boxUnion(words.map((word) => word.bbox)) }];
+  });
+  if (entries.length < 4) return null;
+
+  const buildColumns = (axis) => {
+    const start = axis === 'x' ? 'x0' : 'y0';
+    const end = axis === 'x' ? 'x1' : 'y1';
+    const secondary = axis === 'x' ? 'y0' : 'x0';
+    const sorted = [...entries].sort((a, b) => a.bbox[start] - b.bbox[start]);
+    const groups = [];
+    for (const entry of sorted) {
+      const tolerance = 10;
+      let group = groups.find((candidate) => entry.bbox[start] <= candidate.end + tolerance && entry.bbox[end] >= candidate.start - tolerance);
+      if (!group) {
+        group = { start: entry.bbox[start], end: entry.bbox[end], entries: [] };
+        groups.push(group);
+      }
+      group.entries.push(entry);
+      group.start = Math.min(group.start, entry.bbox[start]);
+      group.end = Math.max(group.end, entry.bbox[end]);
+    }
+    const columns = groups.filter((group) => group.entries.length >= 2).sort((a, b) => a.start - b.start);
+    const covered = columns.reduce((sum, column) => sum + column.entries.length, 0);
+    return { axis, secondary, columns, covered };
+  };
+  const candidates = [buildColumns('x'), buildColumns('y')]
+    .filter((candidate) => candidate.columns.length >= 2 && candidate.columns.length <= 8 && candidate.covered >= Math.ceil(entries.length * 0.65));
+  if (!candidates.length) return null;
+  const widths = entries.map((entry) => entry.bbox.x1 - entry.bbox.x0).sort((a, b) => a - b);
+  const heights = entries.map((entry) => entry.bbox.y1 - entry.bbox.y0).sort((a, b) => a - b);
+  const medianWidth = widths[Math.floor(widths.length / 2)] || 1;
+  const medianHeight = heights[Math.floor(heights.length / 2)] || 1;
+  const preferredAxis = medianHeight > medianWidth * 1.4 ? 'y' : 'x';
+  candidates.sort((a, b) => (a.axis === preferredAxis ? -1 : 1) - (b.axis === preferredAxis ? -1 : 1) || b.covered - a.covered);
+  const { axis, secondary, columns } = candidates[0];
+  const row = columns.map((column) => column.entries
+    .sort((a, b) => a.bbox[secondary] - b.bbox[secondary])
+    .map((entry) => entry.text)
+    .join('\n'));
+  return {
+    type: 'table',
+    rows: [row],
+    colCount: row.length,
+    text: row.join('\t'),
+    bbox: boxUnion(columns.flatMap((column) => column.entries.map((entry) => entry.bbox))),
+    cells: row.map((text, col) => ({ row: 0, col, text })),
+    lines: [],
+    structureSource: 'ocr-space-overlay',
+    suggestedRotation: axis === 'y' ? 90 : 0,
+  };
+}
+
+const OCR_SPACE_DAILY_LIMIT = 500;
+
+function usageKey() {
+  return `t3_ocr_space_usage_${new Date().toISOString().slice(0, 10)}`;
+}
+
+export function getOcrSpaceUsage() {
+  try { return Number(localStorage.getItem(usageKey()) || 0); } catch { return 0; }
+}
+
+function reserveOcrSpaceRequest() {
+  const used = getOcrSpaceUsage();
+  if (used >= OCR_SPACE_DAILY_LIMIT) {
+    const error = new Error('Daily high-quality OCR limit reached; using local OCR for remaining pages.');
+    error.code = 'OCR_DAILY_LIMIT';
+    throw error;
+  }
+  try { localStorage.setItem(usageKey(), String(used + 1)); } catch { /* best effort */ }
+}
+
+export async function ocrSpaceImage(imageSource, options = {}) {
+  const img = await loadImage(imageSource);
   const iw = img.naturalWidth;
   const ih = img.naturalHeight;
-
-  const padding = typeof options === 'number' ? options : options.padding;
-  const tableMode = typeof options === 'object' && !!options.tableMode;
-  const pad = padding !== undefined ? padding : Math.max(8, (bbox.x1 - bbox.x0) * 0.08);
+  const bbox = options.bbox || { x0: 0, y0: 0, x1: iw, y1: ih };
+  const padding = options.padding ?? 0;
+  const tableMode = !!options.tableMode;
+  const pad = padding || 0;
   const sx = Math.max(0, bbox.x0 - pad);
   const sy = Math.max(0, bbox.y0 - pad);
   const sw = Math.min(iw - sx, (bbox.x1 - bbox.x0) + pad * 2);
   const sh = Math.min(ih - sy, (bbox.y1 - bbox.y0) + pad * 2);
-  if (sw < 4 || sh < 4) return { text: '', orientation: 0, table: null };
+  if (sw < 4 || sh < 4) return { text: '', orientation: 0, table: null, paragraphs: [] };
 
-  const MAX_BYTES = 900 * 1024; // safe margin under the free API's 1 MB request limit
-
-  function renderRegion(w, h) {
-    const c = document.createElement('canvas');
-    c.width = w;
-    c.height = h;
-    c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
-    return tableMode ? c.toDataURL('image/jpeg', 0.86) : c.toDataURL('image/png');
+  const MAX_DATA_URL_LENGTH = 900 * 1024;
+  function renderRegion(w, h, quality = 0.88) {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(w));
+    canvas.height = Math.max(1, Math.round(h));
+    canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', quality);
   }
 
-  let b64 = renderRegion(sw, sh);
-  let scale = 1;
-  while (b64.length > MAX_BYTES && scale > 0.2) {
-    scale *= 0.7;
-    const rw = Math.round(sw * scale);
-    const rh = Math.round(sh * scale);
-    if (rw < 40 || rh < 40) break;
-    b64 = renderRegion(rw, rh);
+  let scale = Math.min(1, 2600 / Math.max(sw, sh));
+  let b64 = renderRegion(sw * scale, sh * scale);
+  while (b64.length > MAX_DATA_URL_LENGTH && scale > 0.18) {
+    scale *= 0.75;
+    b64 = renderRegion(sw * scale, sh * scale, 0.82);
   }
 
   const apiKey = CONFIG.OCR_SPACE_API_KEY;
-
-  if (!apiKey) return { text: '', orientation: 0, table: null };
+  if (!apiKey) throw new Error('High-quality OCR API key is not configured.');
+  reserveOcrSpaceRequest();
 
   const params = new URLSearchParams({
     apikey: apiKey,
     OCREngine: '3',
     base64Image: b64,
-    isOverlayRequired: 'false',
+    isOverlayRequired: 'true',
     detectOrientation: 'true',
     isTable: String(tableMode),
     scale: 'true',
   });
-
   const res = await fetch('https://api.ocr.space/parse/image', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params,
   });
-
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+    const responseText = await res.text().catch(() => '');
+    throw new Error(`High-quality OCR HTTP ${res.status}: ${responseText.slice(0, 160)}`);
   }
-
-  let data;
-  try {
-    data = await res.json();
-  } catch {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Invalid JSON response: ${text.slice(0, 200)}`);
-  }
-
-  if (data.OCRExitCode === 1 && data.ParsedResults && data.ParsedResults.length > 0) {
+  const data = await res.json();
+  if (data.OCRExitCode === 1 && data.ParsedResults?.length) {
     const parsed = data.ParsedResults[0];
-    const text = parsed.ParsedText.trim();
+    const text = String(parsed.ParsedText || '').trim();
+    const textTable = tableMode ? parseMarkdownTable(text) : null;
+    const overlayTable = tableMode ? overlayLinesToTable(parsed.TextOverlay?.Lines || []) : null;
+    const table = textTable || overlayTable;
     return {
       text,
-      orientation: parsed.TextOrientation ?? 0,
-      table: tableMode ? parseMarkdownTable(text) : null,
+      orientation: Number(parsed.TextOrientation || table?.suggestedRotation || 0),
+      table,
+      paragraphs: table ? [table] : cloudTextToParagraphs(text, { preferTable: tableMode }),
     };
   }
-  const errMsg = Array.isArray(data.ErrorMessage)
-    ? data.ErrorMessage.join('; ')
-    : data.ErrorMessage || `OCR.space exit code ${data.OCRExitCode}`;
+  const errMsg = Array.isArray(data.ErrorMessage) ? data.ErrorMessage.join('; ') : data.ErrorMessage || `OCR exit code ${data.OCRExitCode}`;
   throw new Error(errMsg);
+}
+
+export async function reOcrRegionDetailed(imageData, bbox, options = {}) {
+  const padding = typeof options === 'number' ? options : options.padding;
+  const tableMode = typeof options === 'object' && !!options.tableMode;
+  return ocrSpaceImage(imageData, {
+    bbox,
+    tableMode,
+    padding: padding !== undefined ? padding : Math.max(8, (bbox.x1 - bbox.x0) * 0.08),
+  });
 }
 
 export async function reOcrRegion(imageData, bbox, padding) {
