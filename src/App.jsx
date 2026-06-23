@@ -62,10 +62,11 @@ export default function App() {
   const [editorTab, setEditorTab] = useState('ocr');
   const [showSettings, setShowSettings] = useState(false);
 
-  const doInitialize = useCallback(async () => {
+  const doInitialize = useCallback(async (allowPicker = false) => {
     try {
       setAppError(null);
-      await retryInitialization();
+      if (allowPicker) await retryInitialization();
+      else await initializeStorage();
       await loadProjects();
       setAppReady(true);
     } catch (err) {
@@ -78,7 +79,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    doInitialize();
+    doInitialize(false);
   }, [doInitialize]);
 
   const loadProjects = async () => {
@@ -209,7 +210,7 @@ export default function App() {
           <p className="text-sm text-gray-600 mb-6 whitespace-pre-wrap">{appError}</p>
           <div className="flex flex-col gap-3 items-center">
             <button
-              onClick={doInitialize}
+              onClick={() => doInitialize(true)}
               className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
             >
               Select Working Folder

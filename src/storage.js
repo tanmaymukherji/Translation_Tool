@@ -44,7 +44,7 @@ async function _retrieveHandle() {
   }
 }
 
-async function _getBaseDir() {
+async function _getBaseDir(allowPicker = true) {
   if (_baseDirHandle) return _baseDirHandle;
 
   _baseDirHandle = await _retrieveHandle();
@@ -53,8 +53,12 @@ async function _getBaseDir() {
     try {
       const perm = await _baseDirHandle.queryPermission({ mode: 'readwrite' });
       if (perm !== 'granted') {
-        const result = await _baseDirHandle.requestPermission({ mode: 'readwrite' });
-        if (result !== 'granted') _baseDirHandle = null;
+        if (allowPicker) {
+          const result = await _baseDirHandle.requestPermission({ mode: 'readwrite' });
+          if (result !== 'granted') _baseDirHandle = null;
+        } else {
+          _baseDirHandle = null;
+        }
       }
     } catch {
       _baseDirHandle = null;
@@ -62,6 +66,11 @@ async function _getBaseDir() {
   }
 
   if (!_baseDirHandle) {
+    if (!allowPicker) {
+      const error = new Error('Select a working folder to store projects and source files.');
+      error.code = 'STORAGE_SELECTION_REQUIRED';
+      throw error;
+    }
     _baseDirHandle = await window.showDirectoryPicker({
       id: 't3-work-dir',
       startIn: 'documents',
@@ -100,7 +109,7 @@ export function buildHtmlContent(paragraphs) {
   }).join('\n');
 }
 
-export async function initializeStorage() {
+export async function initializeStorage(options = {}) {
   try {
     // Check browser support
     if (!('showDirectoryPicker' in window)) {
@@ -111,12 +120,12 @@ export async function initializeStorage() {
       throw new Error('A secure context (HTTPS or localhost) is required. The app is currently running over an insecure connection.');
     }
 
-    _baseDirHandle = await _getBaseDir();
+    _baseDirHandle = await _getBaseDir(!!options.allowPicker);
     _projectsDirHandle = await _getProjectsDir();
     await clearOldData();
     return { name: _baseDirHandle.name };
   } catch (err) {
-    if (err.name === 'AbortError') throw err;
+    if (err.name === 'AbortError' || err.code === 'STORAGE_SELECTION_REQUIRED') throw err;
     console.error('Storage initialization failed:', err);
     throw new Error(err.message || 'Storage permission denied. Please allow access to use this application.');
   }
@@ -126,7 +135,7 @@ export async function retryInitialization() {
   // Reset cached handles so a fresh attempt is made
   _baseDirHandle = null;
   _projectsDirHandle = null;
-  return initializeStorage();
+  return initializeStorage({ allowPicker: true });
 }
 
 export async function listProjects() {
